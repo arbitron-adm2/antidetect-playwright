@@ -42,7 +42,7 @@ class EmptyPlaceholder(QWidget):
 
         # Icon
         icon = QLabel("[browser]")
-        icon.setStyleSheet("font-size: 64px; color: #6366f1;")
+        icon.setStyleSheet(f"font-size: 64px; color: {COLORS['accent']};")
         icon.setAlignment(Qt.AlignmentFlag.AlignCenter)
         layout.addWidget(icon)
 

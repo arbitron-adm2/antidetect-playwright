@@ -3,30 +3,30 @@
 # Color palette (Dolphin Anty inspired)
 COLORS = {
     # Background
-    "bg_primary": "#1a1a2e",  # Main background
-    "bg_secondary": "#16162a",  # Sidebar background
-    "bg_tertiary": "#232342",  # Cards/panels
-    "bg_hover": "#2a2a4a",  # Hover state
-    "bg_selected": "#3a3a5a",  # Selected state
+    "bg_primary": "#1a1a1a",
+    "bg_secondary": "#161616",
+    "bg_tertiary": "#232323",
+    "bg_hover": "#2a2a2a",
+    "bg_selected": "#3a3a3a",
     # Accent
-    "accent": "#6366f1",  # Primary accent (indigo)
-    "accent_hover": "#818cf8",  # Accent hover
-    "accent_light": "#4f46e5",  # Darker accent
+    "accent": "#888888",
+    "accent_hover": "#a0a0a0",
+    "accent_light": "#707070",
     # Status colors
-    "success": "#22c55e",  # Green - running
-    "warning": "#f59e0b",  # Orange - warning
-    "error": "#ef4444",  # Red - error/stopped
-    "info": "#3b82f6",  # Blue - info
+    "success": "#4ade80",
+    "warning": "#fbbf24",
+    "error": "#f87171",
+    "info": "#60a5fa",
     # Text
-    "text_primary": "#ffffff",  # Primary text
-    "text_secondary": "#94a3b8",  # Secondary text
-    "text_muted": "#64748b",  # Muted text
+    "text_primary": "#ffffff",
+    "text_secondary": "#9ca3af",
+    "text_muted": "#6b7280",
     # Border
-    "border": "#2e2e4a",  # Default border
-    "border_light": "#3e3e5a",  # Light border
+    "border": "#2e2e2e",
+    "border_light": "#3e3e3e",
     # Tags
-    "tag_bg": "#2a2a4a",  # Tag background
-    "tag_text": "#a5b4fc",  # Tag text
+    "tag_bg": "#2a2a2a",
+    "tag_text": "#d1d5db",
 }
 
 

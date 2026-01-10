@@ -21,88 +21,7 @@ from ..icons import get_icon
 from ..models import ProxyConfig
 from ..proxy_utils import parse_proxy_list, ping_proxy, detect_proxy_geo
 from ..components import FloatingToolbar, CheckboxWidget, HeaderCheckbox
-
-
-def get_country_flag(code: str) -> str:
-    """Get flag emoji for ISO 3166-1 alpha-2 country code.
-
-    Converts country code to Unicode Regional Indicator Symbols.
-    Example: "US" -> 🇺🇸, "DE" -> 🇩🇪
-
-    Works for all 249 ISO 3166-1 alpha-2 codes.
-    """
-    if not code or len(code) != 2:
-        return "🌐"
-    code = code.upper()
-    # Regional Indicator Symbol base: 🇦 = U+1F1E6
-    # Each letter A-Z maps to U+1F1E6 through U+1F1FF
-    try:
-        flag = "".join(chr(0x1F1E6 + ord(c) - ord("A")) for c in code)
-        return flag
-    except (ValueError, TypeError):
-        return "🌐"
-
-
-# Country names for tooltips (common countries only, others use code)
-COUNTRY_NAMES = {
-    "US": "United States",
-    "GB": "United Kingdom",
-    "DE": "Germany",
-    "FR": "France",
-    "IT": "Italy",
-    "ES": "Spain",
-    "NL": "Netherlands",
-    "RU": "Russia",
-    "UA": "Ukraine",
-    "PL": "Poland",
-    "CA": "Canada",
-    "AU": "Australia",
-    "JP": "Japan",
-    "KR": "South Korea",
-    "CN": "China",
-    "BR": "Brazil",
-    "IN": "India",
-    "MX": "Mexico",
-    "TR": "Turkey",
-    "SE": "Sweden",
-    "NO": "Norway",
-    "FI": "Finland",
-    "DK": "Denmark",
-    "CH": "Switzerland",
-    "AT": "Austria",
-    "BE": "Belgium",
-    "PT": "Portugal",
-    "GR": "Greece",
-    "CZ": "Czech Republic",
-    "RO": "Romania",
-    "HU": "Hungary",
-    "IL": "Israel",
-    "AE": "United Arab Emirates",
-    "SG": "Singapore",
-    "HK": "Hong Kong",
-    "TW": "Taiwan",
-    "TH": "Thailand",
-    "VN": "Vietnam",
-    "ID": "Indonesia",
-    "MY": "Malaysia",
-    "PH": "Philippines",
-    "ZA": "South Africa",
-    "EG": "Egypt",
-    "AR": "Argentina",
-    "CL": "Chile",
-    "CO": "Colombia",
-    "PE": "Peru",
-    "VE": "Venezuela",
-    "NZ": "New Zealand",
-    "IE": "Ireland",
-}
-
-
-def get_country_name(code: str) -> str:
-    """Get full country name for country code."""
-    if not code:
-        return "Unknown"
-    return COUNTRY_NAMES.get(code.upper(), code.upper())
+from ..styles import get_country_flag
 
 
 class ProxyPage(QWidget):
@@ -294,10 +213,9 @@ class ProxyPage(QWidget):
             # Country - with flag
             country_code = proxy.country_code.upper() if proxy.country_code else ""
             flag = get_country_flag(country_code)
-            country_name = get_country_name(country_code)
             country_widget = QLabel(f"{flag} {country_code}" if country_code else flag)
             country_widget.setAlignment(Qt.AlignmentFlag.AlignCenter)
-            country_widget.setToolTip(country_name)
+            country_widget.setToolTip(country_code if country_code else "Unknown")
             self.table.setCellWidget(row, 5, country_widget)
 
             # Ping

@@ -209,10 +209,6 @@ class ProfileDialog(QDialog):
             self.profile.proxy = proxy_pool.proxies[idx]
             self._update_proxy_info()
 
-    def _clear_proxy(self):
-        self.profile.proxy = ProxyConfig()
-        self._update_proxy_info()
-
     def _save(self):
         name = self.name_input.text().strip()
         if not name:
@@ -717,7 +713,7 @@ class SettingsDialog(QDialog):
         self.accept()
 
 
-class FingerprintDialog(QDialog):
+class ProfileDataDialog(QDialog):
     """Dialog to view profile data: fingerprint, cookies, storage, etc."""
 
     def __init__(self, profile: BrowserProfile, data_dir, parent=None):

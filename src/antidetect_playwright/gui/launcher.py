@@ -168,8 +168,7 @@ class BrowserLauncher:
                 # Persistent storage for cookies/localStorage
                 "persistent_context": True,
                 "user_data_dir": str(user_data_dir),
-                # CRITICAL: Disable fixed viewport so browser content scales with window!
-                # By default Playwright sets 1280x720 fixed viewport
+                # Disable fixed viewport so browser content scales with window
                 "no_viewport": True,
                 # Enable Chrome theme (Material Fox userChrome.css)
                 "firefox_user_prefs": {
@@ -216,21 +215,9 @@ class BrowserLauncher:
             if profile.os_type in os_map:
                 camoufox_options["os"] = [os_map[profile.os_type]]
 
-            # CRITICAL: Save complete fingerprint config to avoid detection!
-            # Same profile must have same fingerprint across sessions
-            # We save:
-            # - fingerprint: navigator, screen, headers from BrowserForge
-            # - webgl: GPU vendor/renderer
-            # - canvas: anti-aliasing offset for Canvas fingerprint
-            # - fonts: spacing seed for font fingerprint
-            # - history: window.history.length
-            # Without these, each launch would have different fingerprints but same cookies = 100% detection!
-            #
-            # IMPORTANT: We use `config=` parameter, NOT `fingerprint=`!
-            # - fingerprint= expects a Fingerprint dataclass object
-            # - config= accepts a dict that gets merged with generated fingerprint
-            # - merge_into() only sets keys that don't exist, so our values are preserved
-            # NOTE: Screen/window keys are removed later via _remove_screen_window_keys_from_env()
+            # Save complete fingerprint config for consistent profiles across sessions
+            # Same profile must have same fingerprint to avoid detection
+            # Screen/window keys are removed later via _remove_screen_window_keys_from_env()
 
             fingerprint_file = user_data_dir / "fingerprint.json"
             if fingerprint_file.exists():
@@ -340,8 +327,7 @@ class BrowserLauncher:
                 partial(camoufox_launch_options, **camoufox_options),
             )
             
-            # CRITICAL: Remove screen/window keys from CAMOU_CONFIG env vars
-            # This allows the browser to use real window/screen dimensions
+            # Remove screen/window keys from CAMOU_CONFIG env vars for dynamic window sizing
             from_options["env"] = _remove_screen_window_keys_from_env(from_options["env"])
             
             # Add no_viewport for Playwright - let content scale with window
