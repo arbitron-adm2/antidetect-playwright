@@ -437,7 +437,7 @@ class MainWindow(QMainWindow):
         edit_action.triggered.connect(lambda: self._edit_profile(profile))
 
         # View Profile Data (fingerprint, cookies, storage, etc.)
-        data_action = menu.addAction("📋 View Profile Data")
+        data_action = menu.addAction("View Profile Data")
         data_action.triggered.connect(lambda: self._view_fingerprint(profile))
 
         duplicate_action = menu.addAction("Duplicate")
