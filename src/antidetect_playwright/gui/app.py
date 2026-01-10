@@ -45,7 +45,7 @@ from .dialogs import (
     NotesEditDialog,
     ProxyPoolDialog,
     SettingsDialog,
-    FingerprintDialog,
+    ProfileDataDialog,
 )
 from .proxy_utils import ping_proxy, detect_proxy_geo
 from .components import MiniSidebar
@@ -478,7 +478,7 @@ class MainWindow(QMainWindow):
     def _view_fingerprint(self, profile: BrowserProfile):
         """Show fingerprint dialog for profile."""
         data_dir = self.storage._data_dir / "browser_data"
-        dialog = FingerprintDialog(profile, data_dir, parent=self)
+        dialog = ProfileDataDialog(profile, data_dir, parent=self)
         dialog.exec()
 
     def _edit_profile(self, profile: BrowserProfile):

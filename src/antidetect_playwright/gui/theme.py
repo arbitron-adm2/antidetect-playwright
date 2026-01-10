@@ -9,35 +9,35 @@ class Colors:
     """Color palette."""
 
     # Background
-    bg_primary: str = "#1a1a2e"
-    bg_secondary: str = "#16162a"
-    bg_tertiary: str = "#232342"
-    bg_hover: str = "#2a2a4a"
-    bg_selected: str = "#3a3a5a"
+    bg_primary: str = "#1a1a1a"
+    bg_secondary: str = "#161616"
+    bg_tertiary: str = "#232323"
+    bg_hover: str = "#2a2a2a"
+    bg_selected: str = "#3a3a3a"
 
     # Accent
-    accent: str = "#6366f1"
-    accent_hover: str = "#818cf8"
-    accent_light: str = "#4f46e5"
+    accent: str = "#888888"
+    accent_hover: str = "#a0a0a0"
+    accent_light: str = "#707070"
 
     # Status
-    success: str = "#22c55e"
-    warning: str = "#f59e0b"
-    error: str = "#ef4444"
-    info: str = "#3b82f6"
+    success: str = "#4ade80"
+    warning: str = "#fbbf24"
+    error: str = "#f87171"
+    info: str = "#60a5fa"
 
     # Text
     text_primary: str = "#ffffff"
-    text_secondary: str = "#94a3b8"
-    text_muted: str = "#64748b"
+    text_secondary: str = "#9ca3af"
+    text_muted: str = "#6b7280"
 
     # Border
-    border: str = "#2e2e4a"
-    border_light: str = "#3e3e5a"
+    border: str = "#2e2e2e"
+    border_light: str = "#3e3e3e"
 
     # Tags
-    tag_bg: str = "#2a2a4a"
-    tag_text: str = "#a5b4fc"
+    tag_bg: str = "#2a2a2a"
+    tag_text: str = "#d1d5db"
 
 
 @dataclass(frozen=True, slots=True)
