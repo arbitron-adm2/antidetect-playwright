@@ -252,7 +252,7 @@ class ProfilesPage(QWidget):
 
         # Search
         self.search_input = QLineEdit()
-        self.search_input.setPlaceholderText("Search...")
+        self.search_input.setPlaceholderText("Search")
         self.search_input.setFixedWidth(180)
         self.search_input.textChanged.connect(self.search_changed.emit)
         layout.addWidget(self.search_input)

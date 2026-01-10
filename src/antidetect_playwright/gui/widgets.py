@@ -59,7 +59,7 @@ class EmptyPlaceholder(QWidget):
         layout.addWidget(title)
 
         # Subtitle
-        subtitle = QLabel("Create your first browser profile to get started")
+        subtitle = QLabel("Create browser profile to begin")
         subtitle.setStyleSheet(f"color: {COLORS['text_muted']}; font-size: 14px;")
         subtitle.setAlignment(Qt.AlignmentFlag.AlignCenter)
         layout.addWidget(subtitle)

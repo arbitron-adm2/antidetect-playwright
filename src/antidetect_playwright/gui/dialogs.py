@@ -62,7 +62,7 @@ class ProfileDialog(QDialog):
         name_layout = QFormLayout(name_group)
 
         self.name_input = QLineEdit()
-        self.name_input.setPlaceholderText("Enter profile name...")
+        self.name_input.setPlaceholderText("Profile name")
         name_layout.addRow("Name:", self.name_input)
 
         self.os_combo = QComboBox()
@@ -251,7 +251,7 @@ class QuickProfileDialog(QDialog):
         )
 
         self.name_input = QLineEdit()
-        self.name_input.setPlaceholderText("Profile name...")
+        self.name_input.setPlaceholderText("Profile name")
         self.name_input.returnPressed.connect(self._save)
         layout.addWidget(self.name_input)
 
@@ -313,7 +313,7 @@ class FolderDialog(QDialog):
         # Name
         layout.addWidget(QLabel("Folder Name:"))
         self.name_input = QLineEdit()
-        self.name_input.setPlaceholderText("Enter folder name...")
+        self.name_input.setPlaceholderText("Folder name")
         layout.addWidget(self.name_input)
 
         # Color
@@ -400,7 +400,7 @@ class TagsEditDialog(QDialog):
         # Add new tag
         add_layout = QHBoxLayout()
         self.new_tag_input = QLineEdit()
-        self.new_tag_input.setPlaceholderText("New tag...")
+        self.new_tag_input.setPlaceholderText("New tag")
         self.new_tag_input.returnPressed.connect(self._add_tag)
         add_layout.addWidget(self.new_tag_input)
 
@@ -492,7 +492,7 @@ class NotesEditDialog(QDialog):
         layout.setSpacing(12)
 
         self.notes_edit = QTextEdit()
-        self.notes_edit.setPlaceholderText("Add notes about this profile...")
+        self.notes_edit.setPlaceholderText("Profile notes")
         self.notes_edit.setText(self.notes)
         layout.addWidget(self.notes_edit)
 

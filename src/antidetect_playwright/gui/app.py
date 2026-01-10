@@ -449,7 +449,7 @@ class MainWindow(QMainWindow):
         move_menu = menu.addMenu("Move to Folder")
 
         # Root folder option
-        root_action = move_menu.addAction("📁 All Profiles")
+        root_action = move_menu.addAction("All Profiles")
         root_action.triggered.connect(lambda: self._move_profile_to_folder(profile, ""))
         if profile.folder_id == "":
             root_action.setEnabled(False)
@@ -459,7 +459,7 @@ class MainWindow(QMainWindow):
         # Folder options
         folders = self.storage.get_folders()
         for folder in folders:
-            folder_action = move_menu.addAction(f"📁 {folder.name}")
+            folder_action = move_menu.addAction(folder.name)
             folder_action.triggered.connect(
                 lambda checked, fid=folder.id: self._move_profile_to_folder(
                     profile, fid

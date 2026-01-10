@@ -107,7 +107,7 @@ class TagsPage(QWidget):
         add_layout = QHBoxLayout()
 
         self.tag_input = QLineEdit()
-        self.tag_input.setPlaceholderText("Enter new tag name...")
+        self.tag_input.setPlaceholderText("Tag name")
         self.tag_input.returnPressed.connect(self._add_tag)
         add_layout.addWidget(self.tag_input)
 
@@ -200,7 +200,7 @@ class TagsPage(QWidget):
         add_layout = QHBoxLayout()
 
         self.status_name_input = QLineEdit()
-        self.status_name_input.setPlaceholderText("Status name...")
+        self.status_name_input.setPlaceholderText("Status name")
         add_layout.addWidget(self.status_name_input)
 
         self.status_color_combo = QComboBox()
