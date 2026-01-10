@@ -61,8 +61,83 @@ class ProxyConfig:
         if self.username:
             proxy["username"] = self.username
         if self.password:
+            # Password stored in plain text in memory for runtime use
             proxy["password"] = self.password
         return proxy
+
+    def to_dict(self, encrypt_password: bool = True) -> dict:
+        """Serialize to dict with optional password encryption.
+
+        Args:
+            encrypt_password: If True, encrypt password using Fernet
+
+        Returns:
+            Dict representation
+        """
+        from .security import SecurePasswordEncryption
+
+        password = self.password
+        if encrypt_password and password:
+            try:
+                password = SecurePasswordEncryption.encrypt(password)
+            except Exception as e:
+                # Log error but don't fail - worst case password stored in plaintext
+                import logging
+
+                logging.getLogger(__name__).error(f"Failed to encrypt password: {e}")
+
+        return {
+            "enabled": self.enabled,
+            "proxy_type": self.proxy_type.value,
+            "host": self.host,
+            "port": self.port,
+            "username": self.username,
+            "password": password,
+            "country_code": self.country_code,
+            "country_name": self.country_name,
+            "city": self.city,
+            "timezone": self.timezone,
+            "ping_ms": self.ping_ms,
+        }
+
+    @classmethod
+    def from_dict(cls, data: dict, decrypt_password: bool = True) -> "ProxyConfig":
+        """Deserialize from dict with optional password decryption.
+
+        Args:
+            data: Dict representation
+            decrypt_password: If True, decrypt password using Fernet
+
+        Returns:
+            ProxyConfig instance
+        """
+        from .security import SecurePasswordEncryption
+
+        password = data.get("password", "")
+        if decrypt_password and password:
+            try:
+                password = SecurePasswordEncryption.decrypt(password)
+            except Exception as e:
+                # If decryption fails, assume it's plaintext (migration)
+                import logging
+
+                logging.getLogger(__name__).warning(
+                    f"Failed to decrypt password, using as-is: {e}"
+                )
+
+        return cls(
+            enabled=data.get("enabled", False),
+            proxy_type=ProxyType(data.get("proxy_type", "none")),
+            host=data.get("host", ""),
+            port=data.get("port", 0),
+            username=data.get("username", ""),
+            password=password,
+            country_code=data.get("country_code", ""),
+            country_name=data.get("country_name", ""),
+            city=data.get("city", ""),
+            timezone=data.get("timezone", ""),
+            ping_ms=data.get("ping_ms", -1),
+        )
 
     def display_string(self) -> str:
         """Display string for UI."""
@@ -97,25 +172,13 @@ class BrowserProfile:
     os_type: str = "macos"  # windows, macos, linux
 
     def to_dict(self) -> dict:
-        """Serialize to dictionary."""
+        """Serialize to dictionary with encrypted proxy password."""
         return {
             "id": self.id,
             "name": self.name,
             "folder_id": self.folder_id,
             "status": self.status.value,
-            "proxy": {
-                "enabled": self.proxy.enabled,
-                "proxy_type": self.proxy.proxy_type.value,
-                "host": self.proxy.host,
-                "port": self.proxy.port,
-                "username": self.proxy.username,
-                "password": self.proxy.password,
-                "country_code": self.proxy.country_code,
-                "country_name": self.proxy.country_name,
-                "city": self.proxy.city,
-                "timezone": self.proxy.timezone,
-                "ping_ms": self.proxy.ping_ms,
-            },
+            "proxy": self.proxy.to_dict(encrypt_password=True),
             "notes": self.notes,
             "tags": self.tags,
             "created_at": self.created_at.isoformat(),
@@ -125,21 +188,9 @@ class BrowserProfile:
 
     @classmethod
     def from_dict(cls, data: dict) -> "BrowserProfile":
-        """Deserialize from dictionary."""
+        """Deserialize from dictionary with decrypted proxy password."""
         proxy_data = data.get("proxy", {})
-        proxy = ProxyConfig(
-            enabled=proxy_data.get("enabled", False),
-            proxy_type=ProxyType(proxy_data.get("proxy_type", "none")),
-            host=proxy_data.get("host", ""),
-            port=proxy_data.get("port", 0),
-            username=proxy_data.get("username", ""),
-            password=proxy_data.get("password", ""),
-            country_code=proxy_data.get("country_code", ""),
-            country_name=proxy_data.get("country_name", ""),
-            city=proxy_data.get("city", ""),
-            timezone=proxy_data.get("timezone", ""),
-            ping_ms=proxy_data.get("ping_ms", -1),
-        )
+        proxy = ProxyConfig.from_dict(proxy_data, decrypt_password=True)
 
         return cls(
             id=data.get("id", str(uuid.uuid4())),
@@ -215,9 +266,25 @@ class AppSettings:
     window_x: int = -1  # -1 = center on screen
     window_y: int = -1
     sidebar_width: int = 220
+
     # Browser settings
-    save_tabs: bool = True  # Save and restore browser tabs
-    start_page: str = "about:blank"  # Default start page
+    save_tabs: bool = True
+    start_page: str = "about:blank"
+
+    # Performance settings
+    block_images: bool = False
+    enable_cache: bool = True
+
+    # Privacy settings
+    humanize: float = 1.5
+
+    # Extensions
+    exclude_ublock: bool = False
+    exclude_bpc: bool = False
+    custom_addons: list[str] = field(default_factory=list)
+
+    # Debug
+    debug_mode: bool = False
 
     def to_dict(self) -> dict:
         return {
@@ -231,6 +298,13 @@ class AppSettings:
             "sidebar_width": self.sidebar_width,
             "save_tabs": self.save_tabs,
             "start_page": self.start_page,
+            "block_images": self.block_images,
+            "enable_cache": self.enable_cache,
+            "humanize": self.humanize,
+            "exclude_ublock": self.exclude_ublock,
+            "exclude_bpc": self.exclude_bpc,
+            "custom_addons": self.custom_addons,
+            "debug_mode": self.debug_mode,
         }
 
     @classmethod
@@ -246,4 +320,11 @@ class AppSettings:
             sidebar_width=data.get("sidebar_width", 220),
             save_tabs=data.get("save_tabs", True),
             start_page=data.get("start_page", "about:blank"),
+            block_images=data.get("block_images", False),
+            enable_cache=data.get("enable_cache", True),
+            humanize=data.get("humanize", 1.5),
+            exclude_ublock=data.get("exclude_ublock", False),
+            exclude_bpc=data.get("exclude_bpc", False),
+            custom_addons=data.get("custom_addons", []),
+            debug_mode=data.get("debug_mode", False),
         )

@@ -649,42 +649,135 @@ class SettingsDialog(QDialog):
         self._load_settings()
 
     def _setup_ui(self):
+        from PyQt6.QtWidgets import QCheckBox, QTabWidget, QWidget, QDoubleSpinBox, QListWidget, QListWidgetItem, QFileDialog
+        
         self.setWindowTitle("Settings")
-        self.setMinimumWidth(500)
+        self.setMinimumSize(650, 550)
         self.setModal(True)
 
         layout = QVBoxLayout(self)
-        layout.setSpacing(20)
+        layout.setSpacing(12)
 
-        # Browser section
-        browser_group = QGroupBox("Browser Settings")
-        browser_layout = QFormLayout()
-
-        # Save tabs checkbox
-        from PyQt6.QtWidgets import QCheckBox
-
+        # Tab widget
+        tabs = QTabWidget()
+        
+        # Browser tab
+        browser_tab = QWidget()
+        browser_layout = QFormLayout(browser_tab)
+        browser_layout.setSpacing(12)
+        
         self.save_tabs_checkbox = QCheckBox()
         browser_layout.addRow("Save & restore tabs:", self.save_tabs_checkbox)
-
-        # Start page
+        
         self.start_page_input = QLineEdit()
-        self.start_page_input.setPlaceholderText(
-            "about:blank, https://google.com, etc."
-        )
+        self.start_page_input.setPlaceholderText("about:blank, https://google.com")
         browser_layout.addRow("Start page:", self.start_page_input)
-
-        browser_group.setLayout(browser_layout)
-        layout.addWidget(browser_group)
-
-        # Info label
-        info_label = QLabel(
-            "Note: These settings apply to all profiles when launching browser."
-        )
-        info_label.setWordWrap(True)
-        info_label.setStyleSheet(f"color: {COLORS['text_secondary']}; font-size: 12px;")
-        layout.addWidget(info_label)
-
-        layout.addStretch()
+        
+        browser_info = QLabel("Settings apply to all profiles when launching browser")
+        browser_info.setWordWrap(True)
+        browser_info.setStyleSheet(f"color: {COLORS['text_secondary']}; font-size: 11px; margin-top: 8px;")
+        browser_layout.addRow("", browser_info)
+        
+        tabs.addTab(browser_tab, "Browser")
+        
+        # Performance tab
+        perf_tab = QWidget()
+        perf_layout = QFormLayout(perf_tab)
+        perf_layout.setSpacing(12)
+        
+        self.block_images_checkbox = QCheckBox()
+        block_images_label = QLabel("Block images")
+        block_images_help = QLabel("Saves bandwidth, faster page loads")
+        block_images_help.setStyleSheet(f"color: {COLORS['text_muted']}; font-size: 11px;")
+        block_images_container = QVBoxLayout()
+        block_images_container.addWidget(self.block_images_checkbox)
+        block_images_container.addWidget(block_images_help)
+        block_images_container.setSpacing(4)
+        perf_layout.addRow("Block images:", self.block_images_checkbox)
+        perf_layout.addRow("", block_images_help)
+        
+        self.enable_cache_checkbox = QCheckBox()
+        cache_help = QLabel("Cache pages and requests (uses more memory)")
+        cache_help.setStyleSheet(f"color: {COLORS['text_muted']}; font-size: 11px;")
+        perf_layout.addRow("Enable cache:", self.enable_cache_checkbox)
+        perf_layout.addRow("", cache_help)
+        
+        tabs.addTab(perf_tab, "Performance")
+        
+        # Privacy tab
+        privacy_tab = QWidget()
+        privacy_layout = QFormLayout(privacy_tab)
+        privacy_layout.setSpacing(12)
+        
+        self.humanize_spin = QDoubleSpinBox()
+        self.humanize_spin.setRange(0.0, 5.0)
+        self.humanize_spin.setSingleStep(0.1)
+        self.humanize_spin.setDecimals(1)
+        self.humanize_spin.setSuffix(" sec")
+        humanize_help = QLabel("Humanize cursor movement delay (0 = disabled)")
+        humanize_help.setStyleSheet(f"color: {COLORS['text_muted']}; font-size: 11px;")
+        privacy_layout.addRow("Humanize cursor:", self.humanize_spin)
+        privacy_layout.addRow("", humanize_help)
+        
+        tabs.addTab(privacy_tab, "Privacy")
+        
+        # Extensions tab
+        ext_tab = QWidget()
+        ext_layout = QVBoxLayout(ext_tab)
+        ext_layout.setSpacing(12)
+        
+        exclude_label = QLabel("Exclude default extensions:")
+        exclude_label.setStyleSheet(f"font-weight: 600; color: {COLORS['text_primary']};")
+        ext_layout.addWidget(exclude_label)
+        
+        self.exclude_ublock_checkbox = QCheckBox("uBlock Origin (ad blocker)")
+        ext_layout.addWidget(self.exclude_ublock_checkbox)
+        
+        self.exclude_bpc_checkbox = QCheckBox("Bypass Paywalls Clean")
+        ext_layout.addWidget(self.exclude_bpc_checkbox)
+        
+        ext_info = QLabel("Note: Default extensions help with anti-detection and privacy")
+        ext_info.setStyleSheet(f"color: {COLORS['text_secondary']}; font-size: 11px; margin-top: 4px;")
+        ext_layout.addWidget(ext_info)
+        
+        ext_layout.addSpacing(20)
+        
+        custom_label = QLabel("Custom extensions (.xpi files):")
+        custom_label.setStyleSheet(f"font-weight: 600; color: {COLORS['text_primary']};")
+        ext_layout.addWidget(custom_label)
+        
+        self.custom_addons_list = QListWidget()
+        self.custom_addons_list.setMaximumHeight(120)
+        ext_layout.addWidget(self.custom_addons_list)
+        
+        addons_btn_layout = QHBoxLayout()
+        add_addon_btn = QPushButton("Add Extension")
+        add_addon_btn.clicked.connect(self._add_addon)
+        remove_addon_btn = QPushButton("Remove Selected")
+        remove_addon_btn.clicked.connect(self._remove_addon)
+        addons_btn_layout.addWidget(add_addon_btn)
+        addons_btn_layout.addWidget(remove_addon_btn)
+        addons_btn_layout.addStretch()
+        ext_layout.addLayout(addons_btn_layout)
+        
+        ext_layout.addStretch()
+        
+        tabs.addTab(ext_tab, "Extensions")
+        
+        # Debug tab
+        debug_tab = QWidget()
+        debug_layout = QFormLayout(debug_tab)
+        debug_layout.setSpacing(12)
+        
+        self.debug_checkbox = QCheckBox()
+        debug_help = QLabel("Print Camoufox config to console on launch")
+        debug_help.setStyleSheet(f"color: {COLORS['text_muted']}; font-size: 11px;")
+        debug_layout.addRow("Debug mode:", self.debug_checkbox)
+        debug_layout.addRow("", debug_help)
+        
+        tabs.addTab(debug_tab, "Debug")
+        
+        layout.addWidget(tabs)
 
         # Buttons
         btn_layout = QHBoxLayout()
@@ -700,16 +793,61 @@ class SettingsDialog(QDialog):
         btn_layout.addWidget(save_btn)
 
         layout.addLayout(btn_layout)
+        
+        self._load_settings()
+    
+    def _add_addon(self):
+        """Add custom addon path."""
+        from PyQt6.QtWidgets import QFileDialog
+        
+        file_path, _ = QFileDialog.getOpenFileName(
+            self,
+            "Select Extension File",
+            "",
+            "Firefox Extensions (*.xpi)"
+        )
+        if file_path:
+            self.custom_addons_list.addItem(file_path)
+    
+    def _remove_addon(self):
+        """Remove selected addon from list."""
+        current_item = self.custom_addons_list.currentItem()
+        if current_item:
+            self.custom_addons_list.takeItem(self.custom_addons_list.row(current_item))
 
     def _load_settings(self):
         """Load current settings into UI."""
         self.save_tabs_checkbox.setChecked(self.settings.save_tabs)
         self.start_page_input.setText(self.settings.start_page)
+        self.block_images_checkbox.setChecked(self.settings.block_images)
+        self.enable_cache_checkbox.setChecked(self.settings.enable_cache)
+        self.humanize_spin.setValue(self.settings.humanize)
+        self.exclude_ublock_checkbox.setChecked(self.settings.exclude_ublock)
+        self.exclude_bpc_checkbox.setChecked(self.settings.exclude_bpc)
+        self.debug_checkbox.setChecked(self.settings.debug_mode)
+        
+        # Load custom addons
+        self.custom_addons_list.clear()
+        for addon_path in self.settings.custom_addons:
+            self.custom_addons_list.addItem(addon_path)
 
     def _save(self):
         """Save settings and close."""
         self.settings.save_tabs = self.save_tabs_checkbox.isChecked()
         self.settings.start_page = self.start_page_input.text().strip() or "about:blank"
+        self.settings.block_images = self.block_images_checkbox.isChecked()
+        self.settings.enable_cache = self.enable_cache_checkbox.isChecked()
+        self.settings.humanize = self.humanize_spin.value()
+        self.settings.exclude_ublock = self.exclude_ublock_checkbox.isChecked()
+        self.settings.exclude_bpc = self.exclude_bpc_checkbox.isChecked()
+        self.settings.debug_mode = self.debug_checkbox.isChecked()
+        
+        # Save custom addons
+        self.settings.custom_addons = [
+            self.custom_addons_list.item(i).text()
+            for i in range(self.custom_addons_list.count())
+        ]
+        
         self.accept()
 
 

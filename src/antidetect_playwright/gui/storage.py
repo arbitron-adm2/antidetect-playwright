@@ -2,8 +2,11 @@
 
 import json
 import logging
+import tempfile
+import uuid
+from datetime import datetime
 from pathlib import Path
-from typing import Callable
+from typing import Callable, Optional
 
 from .models import (
     BrowserProfile,
@@ -13,8 +16,32 @@ from .models import (
     ProxyConfig,
     ProxyType,
 )
+from .security import SecurePasswordEncryption, validate_uuid, sanitize_path_component
 
 logger = logging.getLogger(__name__)
+
+
+class StorageError(Exception):
+    """Base exception for storage errors."""
+    pass
+
+
+class ProfileNotFoundError(StorageError):
+    """Raised when profile is not found."""
+    
+    def __init__(self, profile_id: str):
+        self.profile_id = profile_id
+        super().__init__(f"Profile not found: {profile_id}")
+
+
+class InvalidProfileDataError(StorageError):
+    """Raised when profile data is invalid or corrupted."""
+    pass
+
+
+class StorageCorruptedError(StorageError):
+    """Raised when storage file is corrupted."""
+    pass
 
 
 class Storage:
@@ -36,9 +63,50 @@ class Storage:
         self._settings: AppSettings = AppSettings()
         self._proxy_pool: ProxyPool = ProxyPool()
         self._tags_pool: list[str] = []
-        self._trash: list[dict] = []  # [{id, name, deleted_at, profile_data}]
+        self._trash: list[dict] = []
+        
+        # Profile ID index for O(1) lookup
+        self._profile_index: dict[str, BrowserProfile] = {}
 
         self._load_all()
+    
+    def _rebuild_index(self) -> None:
+        """Rebuild profile index after load/modify."""
+        self._profile_index = {p.id: p for p in self._profiles}
+    
+    def _atomic_write(self, path: Path, data: str) -> None:
+        """Write file atomically to prevent corruption.
+        
+        Args:
+            path: Destination file path
+            data: JSON data to write
+            
+        Raises:
+            StorageError: If write fails
+        """
+        # Write to temp file in same directory (same filesystem)
+        try:
+            fd, temp_path = tempfile.mkstemp(
+                dir=path.parent,
+                prefix=f".{path.stem}_",
+                suffix=".tmp"
+            )
+        except OSError as e:
+            raise StorageError(f"Failed to create temp file: {e}")
+        
+        try:
+            with open(fd, 'w', encoding='utf-8') as f:
+                f.write(data)
+            # Atomic rename
+            Path(temp_path).replace(path)
+            logger.debug(f"Atomically wrote {path}")
+        except Exception as e:
+            # Clean up temp file on error
+            try:
+                Path(temp_path).unlink()
+            except OSError:
+                pass
+            raise StorageError(f"Failed to write {path}: {e}")
 
     def _load_all(self) -> None:
         """Load all data from files."""
@@ -50,16 +118,44 @@ class Storage:
         self._load_trash()
 
     def _load_profiles(self) -> None:
-        """Load profiles from file."""
-        if self._profiles_file.exists():
-            try:
-                data = json.loads(self._profiles_file.read_text())
-                self._profiles = [
-                    BrowserProfile.from_dict(p) for p in data.get("profiles", [])
-                ]
-            except Exception as e:
-                logger.exception("Error loading profiles: %s", e)
-                self._profiles = []
+        """Load profiles from file.
+        
+        Raises:
+            StorageCorruptedError: If profiles file is corrupted
+        """
+        if not self._profiles_file.exists():
+            logger.info("Profiles file doesn't exist, starting with empty list")
+            self._profiles = []
+            return
+        
+        try:
+            data = json.loads(self._profiles_file.read_text(encoding='utf-8'))
+            profiles_data = data.get("profiles", [])
+            
+            if not isinstance(profiles_data, list):
+                raise InvalidProfileDataError("Profiles data is not a list")
+            
+            self._profiles = []
+            for i, p in enumerate(profiles_data):
+                try:
+                    profile = BrowserProfile.from_dict(p)
+                    self._profiles.append(profile)
+                except Exception as e:
+                    logger.error(f"Failed to load profile #{i}: {e}")
+                    # Continue loading other profiles
+            
+            self._rebuild_index()
+            logger.info(f"Loaded {len(self._profiles)} profiles")
+            
+        except json.JSONDecodeError as e:
+            logger.error(f"Invalid JSON in profiles file: {e}")
+            raise StorageCorruptedError(f"Profiles file is corrupted: {e}")
+        except (KeyError, TypeError) as e:
+            logger.error(f"Invalid profile data structure: {e}")
+            raise InvalidProfileDataError(f"Invalid profile data: {e}")
+        except Exception as e:
+            logger.error(f"Unexpected error loading profiles: {e}")
+            raise StorageError(f"Failed to load profiles: {e}")
 
     def _load_folders(self) -> None:
         """Load folders from file."""
@@ -67,7 +163,11 @@ class Storage:
             try:
                 data = json.loads(self._folders_file.read_text())
                 self._folders = [Folder.from_dict(f) for f in data.get("folders", [])]
-            except Exception:
+            except json.JSONDecodeError as e:
+                logger.error("Invalid JSON in folders file: %s", e)
+                self._folders = []
+            except (KeyError, TypeError) as e:
+                logger.error("Invalid folder data structure: %s", e)
                 self._folders = []
 
     def _load_settings(self) -> None:
@@ -76,7 +176,11 @@ class Storage:
             try:
                 data = json.loads(self._settings_file.read_text())
                 self._settings = AppSettings.from_dict(data)
-            except Exception:
+            except json.JSONDecodeError as e:
+                logger.error("Invalid JSON in settings file: %s", e)
+                self._settings = AppSettings()
+            except (KeyError, TypeError) as e:
+                logger.error("Invalid settings data structure: %s", e)
                 self._settings = AppSettings()
 
     def _load_proxy_pool(self) -> None:
@@ -86,37 +190,47 @@ class Storage:
                 data = json.loads(self._proxy_pool_file.read_text())
                 proxies = []
                 for p in data.get("proxies", []):
+                    # Decrypt password if encrypted
+                    password = p.get("password", "")
+                    if password and p.get("password_encrypted", False):
+                        password = SecurePasswordEncryption.decrypt(password)
+                    
                     proxy = ProxyConfig(
                         enabled=True,
                         proxy_type=ProxyType(p.get("proxy_type", "http")),
                         host=p.get("host", ""),
                         port=p.get("port", 0),
                         username=p.get("username", ""),
-                        password=p.get("password", ""),
+                        password=password,
                         country_code=p.get("country_code", ""),
                         country_name=p.get("country_name", ""),
                     )
                     proxies.append(proxy)
                 self._proxy_pool = ProxyPool(proxies=proxies)
-            except Exception:
+            except json.JSONDecodeError as e:
+                logger.error("Invalid JSON in proxy pool file: %s", e)
+                self._proxy_pool = ProxyPool()
+            except ValueError as e:
+                logger.error("Invalid proxy data: %s", e)
                 self._proxy_pool = ProxyPool()
 
     def save_profiles(self) -> None:
         """Save profiles to file."""
         data = {"profiles": [p.to_dict() for p in self._profiles]}
-        self._profiles_file.write_text(json.dumps(data, indent=2, default=str))
+        self._atomic_write(self._profiles_file, json.dumps(data, indent=2, default=str))
+        self._rebuild_index()
 
     def save_folders(self) -> None:
         """Save folders to file."""
         data = {"folders": [f.to_dict() for f in self._folders]}
-        self._folders_file.write_text(json.dumps(data, indent=2))
+        self._atomic_write(self._folders_file, json.dumps(data, indent=2))
 
     def save_settings(self) -> None:
         """Save settings to file."""
-        self._settings_file.write_text(json.dumps(self._settings.to_dict(), indent=2))
+        self._atomic_write(self._settings_file, json.dumps(self._settings.to_dict(), indent=2))
 
     def save_proxy_pool(self) -> None:
-        """Save proxy pool to file."""
+        """Save proxy pool to file with encrypted passwords."""
         data = {
             "proxies": [
                 {
@@ -124,14 +238,15 @@ class Storage:
                     "host": p.host,
                     "port": p.port,
                     "username": p.username,
-                    "password": p.password,
+                    "password": SecurePasswordEncryption.encrypt(p.password) if p.password else "",
+                    "password_encrypted": bool(p.password),
                     "country_code": p.country_code,
                     "country_name": p.country_name,
                 }
                 for p in self._proxy_pool.proxies
             ]
         }
-        self._proxy_pool_file.write_text(json.dumps(data, indent=2))
+        self._atomic_write(self._proxy_pool_file, json.dumps(data, indent=2))
 
     # Profiles CRUD
     def get_profiles(
@@ -155,44 +270,109 @@ class Storage:
 
         return profiles
 
-    def get_profile(self, profile_id: str) -> BrowserProfile | None:
-        """Get profile by ID."""
-        for p in self._profiles:
-            if p.id == profile_id:
-                return p
-        return None
+    def get_profile(self, profile_id: str) -> BrowserProfile:
+        """Get profile by ID with O(1) lookup.
+        
+        Args:
+            profile_id: Profile UUID
+            
+        Returns:
+            Profile instance
+            
+        Raises:
+            ValueError: If profile_id is invalid UUID
+            ProfileNotFoundError: If profile not found
+        """
+        if not validate_uuid(profile_id):
+            raise ValueError(f"Invalid profile ID format: {profile_id}")
+        
+        profile = self._profile_index.get(profile_id)
+        if not profile:
+            raise ProfileNotFoundError(profile_id)
+        
+        return profile
 
     def add_profile(self, profile: BrowserProfile) -> None:
-        """Add new profile."""
+        """Add new profile.
+        
+        Args:
+            profile: Profile to add
+            
+        Raises:
+            ValueError: If profile ID is invalid or already exists
+            StorageError: If save fails
+        """
+        if not validate_uuid(profile.id):
+            raise ValueError(f"Invalid profile ID format: {profile.id}")
+        
+        if profile.id in self._profile_index:
+            raise ValueError(f"Profile with ID {profile.id} already exists")
+        
         self._profiles.append(profile)
+        self._profile_index[profile.id] = profile
+        logger.info(f"Added profile: {profile.name} ({profile.id})")
         self.save_profiles()
 
     def update_profile(self, profile: BrowserProfile) -> None:
-        """Update existing profile."""
+        """Update existing profile.
+        
+        Args:
+            profile: Profile with updated data
+            
+        Raises:
+            ValueError: If profile ID is invalid
+            ProfileNotFoundError: If profile doesn't exist
+            StorageError: If save fails
+        """
+        if not validate_uuid(profile.id):
+            raise ValueError(f"Invalid profile ID format: {profile.id}")
+        
+        # Check if profile exists
+        if profile.id not in self._profile_index:
+            raise ProfileNotFoundError(profile.id)
+        
         for i, p in enumerate(self._profiles):
             if p.id == profile.id:
                 self._profiles[i] = profile
+                self._profile_index[profile.id] = profile
+                logger.info(f"Updated profile: {profile.name} ({profile.id})")
                 break
+        
         self.save_profiles()
 
     def delete_profile(self, profile_id: str, move_to_trash: bool = True) -> None:
-        """Delete profile, optionally moving to trash."""
-        from datetime import datetime
+        """Delete profile, optionally moving to trash.
+        
+        Args:
+            profile_id: Profile UUID to delete
+            move_to_trash: If True, move to trash; if False, permanently delete
+            
+        Raises:
+            ValueError: If profile_id is invalid
+            ProfileNotFoundError: If profile doesn't exist
+            StorageError: If save fails
+        """
+        if not validate_uuid(profile_id):
+            raise ValueError(f"Invalid profile ID format: {profile_id}")
 
-        profile = self.get_profile(profile_id)
-        if profile:
-            if move_to_trash:
-                trash_item = {
-                    "id": profile.id,
-                    "name": profile.name,
-                    "deleted_at": datetime.now().isoformat(),
-                    "profile_data": profile.to_dict(),
-                }
-                self._trash.append(trash_item)
-                self._save_trash()
+        profile = self._profile_index.get(profile_id)
+        if not profile:
+            raise ProfileNotFoundError(profile_id)
+        
+        if move_to_trash:
+            trash_item = {
+                "id": profile.id,
+                "name": profile.name,
+                "deleted_at": datetime.now().isoformat(),
+                "profile_data": profile.to_dict(),
+            }
+            self._trash.append(trash_item)
+            self._save_trash()
 
-            self._profiles = [p for p in self._profiles if p.id != profile_id]
-            self.save_profiles()
+        self._profiles = [p for p in self._profiles if p.id != profile_id]
+        self._profile_index.pop(profile_id, None)
+        logger.info(f"Deleted profile: {profile.name} ({profile_id})")
+        self.save_profiles()
 
     # Folders CRUD
     def get_folders(self) -> list[Folder]:
@@ -261,13 +441,14 @@ class Storage:
             try:
                 data = json.loads(self._tags_pool_file.read_text())
                 self._tags_pool = data.get("tags", [])
-            except Exception:
+            except json.JSONDecodeError as e:
+                logger.error("Invalid JSON in tags pool file: %s", e)
                 self._tags_pool = []
 
     def save_tags_pool(self) -> None:
         """Save tags pool to file."""
         data = {"tags": self._tags_pool}
-        self._tags_pool_file.write_text(json.dumps(data, indent=2))
+        self._atomic_write(self._tags_pool_file, json.dumps(data, indent=2))
 
     def get_tags_pool(self) -> list[str]:
         """Get tags pool."""
@@ -306,13 +487,14 @@ class Storage:
             try:
                 data = json.loads(self._trash_file.read_text())
                 self._trash = data.get("items", [])
-            except Exception:
+            except json.JSONDecodeError as e:
+                logger.error("Invalid JSON in trash file: %s", e)
                 self._trash = []
 
     def _save_trash(self) -> None:
         """Save trash to file."""
         data = {"items": self._trash}
-        self._trash_file.write_text(json.dumps(data, indent=2))
+        self._atomic_write(self._trash_file, json.dumps(data, indent=2))
 
     def get_trash(self) -> list[dict]:
         """Get all trashed profiles."""

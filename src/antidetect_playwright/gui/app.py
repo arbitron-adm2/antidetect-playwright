@@ -30,6 +30,7 @@ from .models import BrowserProfile, ProfileStatus
 from .storage import Storage
 from .launcher import BrowserLauncher
 from .theme import Theme
+from .security import install_secure_logging
 from .widgets import (
     StatusBadge,
     TagsWidget,
@@ -875,7 +876,7 @@ class MainWindow(QMainWindow):
         self.tags_page._deselect_all_templates()
 
     def closeEvent(self, event):
-        """Handle window close."""
+        """Handle window close with graceful browser shutdown."""
         # Save window size and position
         self.settings.window_width = self.width()
         self.settings.window_height = self.height()
@@ -883,8 +884,16 @@ class MainWindow(QMainWindow):
         self.settings.window_y = self.y()
         self.storage.update_settings(self.settings)
 
-        # Stop event loop
+        # Graceful shutdown all running browsers
         loop = asyncio.get_event_loop()
+        if loop.is_running() and hasattr(self.profiles_page, 'launcher'):
+            try:
+                future = asyncio.ensure_future(self.profiles_page.launcher.cleanup())
+                loop.run_until_complete(asyncio.wait_for(future, timeout=5.0))
+            except (asyncio.TimeoutError, RuntimeError):
+                pass
+
+        # Stop event loop
         if loop.is_running():
             loop.stop()
 
@@ -893,6 +902,9 @@ class MainWindow(QMainWindow):
 
 def main():
     """Main entry point."""
+    # Install secure logging filter to prevent credential leaks
+    install_secure_logging()
+    
     app = QApplication(sys.argv)
     app.setStyle("Fusion")
 
