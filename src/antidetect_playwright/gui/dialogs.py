@@ -737,7 +737,7 @@ class FingerprintDialog(QDialog):
         layout.setSpacing(12)
 
         # Header
-        header = QLabel(f"📋 Profile: {self.profile.name}")
+        header = QLabel(f"Profile Data: {self.profile.name}")
         header.setStyleSheet(f"font-size: 16px; font-weight: bold; color: {COLORS['text_primary']};")
         layout.addWidget(header)
 
@@ -766,41 +766,41 @@ class FingerprintDialog(QDialog):
 
         # Tab 1: Fingerprint
         self.fingerprint_tab = self._create_fingerprint_tab()
-        self.tabs.addTab(self.fingerprint_tab, "🔍 Fingerprint")
+        self.tabs.addTab(self.fingerprint_tab, "Fingerprint")
 
         # Tab 2: Cookies
         self.cookies_tab = self._create_cookies_tab()
-        self.tabs.addTab(self.cookies_tab, "🍪 Cookies")
+        self.tabs.addTab(self.cookies_tab, "Cookies")
 
         # Tab 3: Storage (localStorage/IndexedDB)
         self.storage_tab = self._create_storage_tab()
-        self.tabs.addTab(self.storage_tab, "💾 Storage")
+        self.tabs.addTab(self.storage_tab, "Storage")
 
         # Tab 4: History
         self.history_tab = self._create_history_tab()
-        self.tabs.addTab(self.history_tab, "📜 History")
+        self.tabs.addTab(self.history_tab, "History")
 
         # Tab 5: Cache
         self.cache_tab = self._create_cache_tab()
-        self.tabs.addTab(self.cache_tab, "📦 Cache")
+        self.tabs.addTab(self.cache_tab, "Cache")
 
         # Tab 6: Permissions
         self.permissions_tab = self._create_permissions_tab()
-        self.tabs.addTab(self.permissions_tab, "🔐 Permissions")
+        self.tabs.addTab(self.permissions_tab, "Permissions")
 
         layout.addWidget(self.tabs)
 
         # Bottom buttons
         btn_layout = QHBoxLayout()
         
-        clear_all_btn = QPushButton("🗑️ Clear All Data")
+        clear_all_btn = QPushButton("Clear All Data")
         clear_all_btn.setStyleSheet(f"background: {COLORS['error']}; color: white;")
         clear_all_btn.clicked.connect(self._clear_all_data)
         btn_layout.addWidget(clear_all_btn)
 
         btn_layout.addStretch()
 
-        refresh_btn = QPushButton("🔄 Refresh")
+        refresh_btn = QPushButton("Refresh")
         refresh_btn.clicked.connect(self._refresh_all)
         btn_layout.addWidget(refresh_btn)
 
@@ -845,11 +845,11 @@ class FingerprintDialog(QDialog):
 
         btn_layout = QHBoxLayout()
         
-        copy_btn = QPushButton("📋 Copy")
+        copy_btn = QPushButton("Copy")
         copy_btn.clicked.connect(lambda: self._copy_text(self.fingerprint_display))
         btn_layout.addWidget(copy_btn)
 
-        regenerate_btn = QPushButton("🔄 Regenerate")
+        regenerate_btn = QPushButton("Regenerate")
         regenerate_btn.setStyleSheet(f"background: {COLORS['warning']}; color: white;")
         regenerate_btn.clicked.connect(self._regenerate_fingerprint)
         btn_layout.addWidget(regenerate_btn)
@@ -893,15 +893,15 @@ class FingerprintDialog(QDialog):
 
         btn_layout = QHBoxLayout()
         
-        export_btn = QPushButton("📤 Export Cookies")
+        export_btn = QPushButton("Export")
         export_btn.clicked.connect(self._export_cookies)
         btn_layout.addWidget(export_btn)
 
-        import_btn = QPushButton("📥 Import Cookies")
+        import_btn = QPushButton("Import")
         import_btn.clicked.connect(self._import_cookies)
         btn_layout.addWidget(import_btn)
 
-        clear_btn = QPushButton("🗑️ Clear Cookies")
+        clear_btn = QPushButton("Clear")
         clear_btn.setStyleSheet(f"background: {COLORS['warning']}; color: white;")
         clear_btn.clicked.connect(self._clear_cookies)
         btn_layout.addWidget(clear_btn)
@@ -925,7 +925,7 @@ class FingerprintDialog(QDialog):
 
         btn_layout = QHBoxLayout()
         
-        clear_btn = QPushButton("🗑️ Clear Storage")
+        clear_btn = QPushButton("Clear")
         clear_btn.setStyleSheet(f"background: {COLORS['warning']}; color: white;")
         clear_btn.clicked.connect(self._clear_storage)
         btn_layout.addWidget(clear_btn)
@@ -967,7 +967,7 @@ class FingerprintDialog(QDialog):
 
         btn_layout = QHBoxLayout()
         
-        clear_btn = QPushButton("🗑️ Clear History")
+        clear_btn = QPushButton("Clear")
         clear_btn.setStyleSheet(f"background: {COLORS['warning']}; color: white;")
         clear_btn.clicked.connect(self._clear_history)
         btn_layout.addWidget(clear_btn)
@@ -991,7 +991,7 @@ class FingerprintDialog(QDialog):
 
         btn_layout = QHBoxLayout()
         
-        clear_btn = QPushButton("🗑️ Clear Cache")
+        clear_btn = QPushButton("Clear")
         clear_btn.setStyleSheet(f"background: {COLORS['warning']}; color: white;")
         clear_btn.clicked.connect(self._clear_cache)
         btn_layout.addWidget(clear_btn)
@@ -1032,7 +1032,7 @@ class FingerprintDialog(QDialog):
 
         btn_layout = QHBoxLayout()
         
-        clear_btn = QPushButton("🗑️ Clear Permissions")
+        clear_btn = QPushButton("Clear")
         clear_btn.setStyleSheet(f"background: {COLORS['warning']}; color: white;")
         clear_btn.clicked.connect(self._clear_permissions)
         btn_layout.addWidget(clear_btn)
@@ -1075,15 +1075,15 @@ class FingerprintDialog(QDialog):
 
         if not fingerprint_file.exists():
             self.fingerprint_display.setPlainText(
-                "⚠️ Fingerprint not yet generated.\n\n"
+                "Fingerprint not yet generated.\n\n"
                 "The fingerprint will be created on first profile launch.\n\n"
                 "It will include:\n"
-                "  • Navigator (User-Agent, platform, languages)\n"
-                "  • Screen (resolution, color depth)\n"
-                "  • WebGL (GPU vendor/renderer)\n"
-                "  • Canvas (anti-aliasing settings)\n"
-                "  • Fonts (spacing seed)\n"
-                "  • And more..."
+                "  - Navigator (User-Agent, platform, languages)\n"
+                "  - Screen (resolution, color depth)\n"
+                "  - WebGL (GPU vendor/renderer)\n"
+                "  - Canvas (anti-aliasing settings)\n"
+                "  - Fonts (spacing seed)\n"
+                "  - And more"
             )
             return
 
@@ -1103,36 +1103,36 @@ class FingerprintDialog(QDialog):
         lines.append("")
         
         if "os" in fp_data:
-            lines.append(f"🖥️  OS Type: {fp_data['os'].upper()}")
+            lines.append(f"OS: {fp_data['os'].upper()}")
             lines.append("")
 
         if "webgl" in fp_data:
-            lines.append("🎮 WebGL (GPU)")
+            lines.append("WebGL")
             lines.append("-" * 40)
             lines.append(f"  Vendor:   {fp_data['webgl'].get('vendor', 'N/A')}")
             lines.append(f"  Renderer: {fp_data['webgl'].get('renderer', 'N/A')}")
             lines.append("")
 
         if "canvas" in fp_data:
-            lines.append("🎨 Canvas")
+            lines.append("Canvas")
             lines.append("-" * 40)
             lines.append(f"  AA Offset: {fp_data['canvas'].get('aaOffset', 'N/A')}")
             lines.append("")
 
         if "fonts" in fp_data:
-            lines.append("🔤 Fonts")
+            lines.append("Fonts")
             lines.append("-" * 40)
             lines.append(f"  Spacing Seed: {fp_data['fonts'].get('spacing_seed', 'N/A')}")
             lines.append("")
 
         if "history_length" in fp_data:
-            lines.append("📜 History Length: " + str(fp_data['history_length']))
+            lines.append("History Length: " + str(fp_data['history_length']))
             lines.append("")
 
         if "fingerprint" in fp_data:
             fp = fp_data["fingerprint"]
             
-            lines.append("🌐 Navigator")
+            lines.append("Navigator")
             lines.append("-" * 40)
             for key in sorted([k for k in fp.keys() if k.startswith("navigator.")]):
                 value = fp[key]
@@ -1141,13 +1141,13 @@ class FingerprintDialog(QDialog):
                 lines.append(f"  {key.replace('navigator.', '')}: {value}")
             lines.append("")
 
-            lines.append("📺 Screen")
+            lines.append("Screen")
             lines.append("-" * 40)
             for key in sorted([k for k in fp.keys() if k.startswith("screen.")]):
                 lines.append(f"  {key.replace('screen.', '')}: {fp[key]}")
             lines.append("")
 
-            lines.append("🪟 Window")
+            lines.append("Window")
             lines.append("-" * 40)
             for key in sorted([k for k in fp.keys() if k.startswith("window.")]):
                 lines.append(f"  {key.replace('window.', '')}: {fp[key]}")
@@ -1247,15 +1247,15 @@ class FingerprintDialog(QDialog):
             lines.append("")
             lines.append("-" * 50)
 
-            for site in sites[:50]:  # Show top 50
+            for site in sites[:50]:
                 size_kb = site["size"] / 1024
                 flags = []
                 if site["localStorage"]:
-                    flags.append("LS")
+                    flags.append("localStorage")
                 if site["indexedDB"]:
-                    flags.append("IDB")
+                    flags.append("indexedDB")
                 lines.append(f"{site['name']}")
-                lines.append(f"  Size: {size_kb:.1f} KB | {', '.join(flags) if flags else 'Empty'}")
+                lines.append(f"  Size: {size_kb:.1f} KB | {', '.join(flags) if flags else 'empty'}")
                 lines.append("")
 
         except Exception as e:
@@ -1323,15 +1323,10 @@ class FingerprintDialog(QDialog):
                     total_files += 1
                     total_size += f.stat().st_size
 
-            lines.append(f"📁 Cache directory: {cache_dir}")
+            lines.append(f"Cache directory: {cache_dir}")
             lines.append("")
             lines.append(f"Total files: {total_files}")
             lines.append(f"Total size: {total_size / (1024*1024):.2f} MB")
-            lines.append("")
-            lines.append("-" * 50)
-            lines.append("")
-            lines.append("Cache contains images, scripts, stylesheets,")
-            lines.append("and other static resources from visited sites.")
 
         except Exception as e:
             lines.append(f"Error reading cache: {e}")
@@ -1362,7 +1357,7 @@ class FingerprintDialog(QDialog):
             conn.close()
 
             # Permission values: 1=allow, 2=deny
-            perm_map = {1: "✅ Allow", 2: "❌ Deny", 0: "Default"}
+            perm_map = {1: "Allow", 2: "Deny", 0: "Default"}
 
             self.permissions_table.setRowCount(len(rows))
             for i, (origin, ptype, perm) in enumerate(rows):
@@ -1602,16 +1597,16 @@ class FingerprintDialog(QDialog):
         import shutil
 
         reply = QMessageBox.warning(
-            self, "⚠️ Clear ALL Data",
-            "This will delete:\n"
-            "• Fingerprint\n"
-            "• All cookies\n"
-            "• All localStorage/IndexedDB\n"
-            "• Browsing history\n"
-            "• Cache\n"
-            "• Permissions\n\n"
-            "The profile will be like NEW.\n\n"
-            "ARE YOU SURE?",
+            self, "Clear All Data",
+            "This will delete all profile data:\n\n"
+            "- Fingerprint\n"
+            "- Cookies\n"
+            "- Storage (localStorage/IndexedDB)\n"
+            "- Browsing history\n"
+            "- Cache\n"
+            "- Permissions\n\n"
+            "The profile will be reset to default state.\n\n"
+            "Continue?",
             QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
             QMessageBox.StandardButton.No
         )
@@ -1633,11 +1628,10 @@ class FingerprintDialog(QDialog):
         reply = QMessageBox.warning(
             self,
             "Regenerate Fingerprint",
-            "⚠️ Warning!\n\n"
-            "Regenerating fingerprint while keeping cookies and localStorage "
+            "Warning: Regenerating fingerprint while keeping cookies and storage "
             "may cause detection on sites you've previously visited.\n\n"
-            "This is because the site will see a 'new device' with existing session.\n\n"
-            "Recommended: Also clear browser data if you regenerate fingerprint.\n\n"
+            "The site will see a new device with an existing session.\n\n"
+            "Recommended: Clear browser data before regenerating fingerprint.\n\n"
             "Continue?",
             QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
             QMessageBox.StandardButton.No
