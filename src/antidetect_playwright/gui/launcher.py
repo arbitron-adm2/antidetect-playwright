@@ -149,18 +149,20 @@ class BrowserLauncher:
             proxy = profile.proxy.to_camoufox()
 
             logger.info("Starting profile: %s", profile.name)
-            logger.debug("Proxy: %s", proxy)
+            logger.debug("Proxy configured: host=%s, port=%s", 
+                        profile.proxy.host if profile.proxy else None,
+                        profile.proxy.port if profile.proxy else None)
             logger.debug("Data dir: %s", user_data_dir)
 
-            # Camoufox options - maximum protection
+            # Camoufox options - maximum protection + user settings
             camoufox_options = {
                 "headless": False,
                 # GeoIP auto-detects timezone/locale from proxy IP
                 "geoip": proxy is not None,
                 # Block WebRTC to prevent IP leak
                 "block_webrtc": True,
-                # Human-like cursor movement (critical for antidetect!)
-                "humanize": 1.5,
+                # Human-like cursor movement (from settings)
+                "humanize": self._settings.humanize if self._settings else 1.5,
                 # Disable Cross-Origin-Opener-Policy for Turnstile/Cloudflare
                 "disable_coop": True,
                 # Suppress warnings for intentional settings
@@ -170,6 +172,11 @@ class BrowserLauncher:
                 "user_data_dir": str(user_data_dir),
                 # Disable fixed viewport so browser content scales with window
                 "no_viewport": True,
+                # Performance settings
+                "block_images": self._settings.block_images if self._settings else False,
+                "enable_cache": self._settings.enable_cache if self._settings else True,
+                # Debug mode
+                "debug": self._settings.debug_mode if self._settings else False,
                 # Enable Chrome theme (Material Fox userChrome.css)
                 "firefox_user_prefs": {
                     # Enable Chrome theme (userChrome.css)
@@ -199,6 +206,21 @@ class BrowserLauncher:
 
             if proxy:
                 camoufox_options["proxy"] = proxy
+            
+            # Extensions (default: uBlock Origin, BPC)
+            if self._settings:
+                from camoufox import DefaultAddons
+                exclude_addons = []
+                if self._settings.exclude_ublock:
+                    exclude_addons.append(DefaultAddons.UBO)
+                if self._settings.exclude_bpc:
+                    exclude_addons.append(DefaultAddons.BPC)
+                if exclude_addons:
+                    camoufox_options["exclude_addons"] = exclude_addons
+                
+                # Custom addons
+                if self._settings.custom_addons:
+                    camoufox_options["addons"] = self._settings.custom_addons
 
             # OS hint for fingerprint generation
             os_map = {
