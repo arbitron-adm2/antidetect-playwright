@@ -1,0 +1,117 @@
+# .gitignore
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+
+# Virtual environments
+.venv/
+venv/
+ENV/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# Internal documentation and configs
+.docs/
+.github/
+
+# Testing
+.pytest_cache/
+.coverage
+htmlcov/
+.tox/
+.nox/
+
+# Type checking
+.mypy_cache/
+.dmypy.json
+
+# Logs
+*.log
+logs/
+**/*.log
+
+# Data directories - exclude all user data
+/data/
+!/data/.gitkeep
+
+# Browser profiles and user data
+data/browser_data/
+data/profiles/
+data/sessions/
+data/screenshots/
+data/results/
+
+# Proxy lists
+data/proxies/
+data/proxy_pool.json
+
+# User configurations
+data/folders.json
+data/profiles.json
+data/settings.json
+
+# Environment
+.env
+.env.local
+.env.*.local
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Temporary files
+*.tmp
+*.temp
+tmp/
+temp/
+.cache/
+
+# Secrets
+*.pem
+*.key
+secrets/
+
+# Browser data
+*.har
+*.zip
+*.sqlite
+*.sqlite-shm
+*.sqlite-wal
+*.jsonlz4
+*.lz4
+
+# Browser cache and state
+**/cache2/
+**/startupCache/
+**/storage/
+**/thumbnails/
+**/sessionstore-backups/
+browser_state.json
+
+# Lock files
+**/lock
+*.lock

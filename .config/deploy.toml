@@ -1,0 +1,55 @@
+# Deployment Configuration
+
+[docker]
+# Base image
+base_image = "python:3.12-slim"
+# Working directory
+workdir = "/app"
+# User ID for non-root execution
+uid = 1000
+# Group ID
+gid = 1000
+
+[resources]
+# Memory limit
+memory_limit = "4g"
+# CPU limit
+cpu_limit = "2.0"
+# Memory reservation
+memory_reservation = "1g"
+
+[healthcheck]
+# Healthcheck endpoint
+endpoint = "/health"
+# Interval in seconds
+interval = 30
+# Timeout in seconds
+timeout = 10
+# Retries
+retries = 3
+# Start period in seconds
+start_period = 60
+
+[volumes]
+# Data volume mount
+data = "/data"
+# Config volume mount
+config = "/app/.config"
+# Scripts volume mount
+scripts = "/data/scripts"
+
+[network]
+# Docker network mode
+mode = "bridge"
+# Expose ports
+ports = [8080]
+
+[scaling]
+# Min replicas
+min_replicas = 1
+# Max replicas
+max_replicas = 10
+# Scale trigger CPU threshold
+cpu_threshold = 80
+# Scale trigger memory threshold
+memory_threshold = 80

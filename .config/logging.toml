@@ -1,0 +1,35 @@
+# Logging Configuration
+
+[logging]
+# Log level: DEBUG, INFO, WARNING, ERROR, CRITICAL
+level = "INFO"
+# Log format
+format = "%(asctime)s | %(levelname)s | %(name)s | %(message)s"
+# Date format
+date_format = "%Y-%m-%d %H:%M:%S"
+
+[logging.handlers]
+# Console handler
+console = true
+# File handler
+file = true
+# JSON structured logging
+json = false
+
+[logging.rotation]
+# Max log file size in MB
+max_size_mb = 100
+# Backup count
+backup_count = 5
+# Compression
+compress = true
+
+[logging.modules]
+# Per-module log levels
+"antidetect_playwright" = "INFO"
+"antidetect_playwright.browser" = "INFO"
+"antidetect_playwright.stealth" = "DEBUG"
+"antidetect_playwright.proxy" = "INFO"
+"antidetect_playwright.task" = "INFO"
+"playwright" = "WARNING"
+"asyncio" = "WARNING"

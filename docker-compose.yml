@@ -1,0 +1,65 @@
+version: "3.8"
+
+services:
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: antidetect-playwright
+    restart: unless-stopped
+    depends_on:
+      redis:
+        condition: service_healthy
+    environment:
+      - APP_REDIS_HOST=${APP_REDIS_HOST}
+      - APP_REDIS_PORT=${APP_REDIS_PORT}
+      - APP_REDIS_PASSWORD=${APP_REDIS_PASSWORD}
+      - APP_REDIS_DB=${APP_REDIS_DB}
+      - APP_BROWSER_HEADLESS=${APP_BROWSER_HEADLESS}
+      - APP_BROWSER_MAX_CONTEXTS=${APP_BROWSER_MAX_CONTEXTS}
+      - APP_TASK_RUNNER_MAX_CONCURRENT_TASKS=${APP_TASK_RUNNER_MAX_CONCURRENT_TASKS}
+      - APP_LOGGING_LEVEL=${APP_LOGGING_LEVEL}
+    volumes:
+      - ./data:/data
+      - ./.config:/app/.config:ro
+    deploy:
+      resources:
+        limits:
+          memory: ${DOCKER_APP_MEMORY_LIMIT}
+          cpus: "${DOCKER_APP_CPU_LIMIT}"
+        reservations:
+          memory: ${DOCKER_APP_MEMORY_RESERVATION}
+    networks:
+      - antidetect
+
+  redis:
+    image: redis:${REDIS_VERSION}-alpine
+    container_name: antidetect-redis
+    restart: unless-stopped
+    command: >
+      redis-server
+      --appendonly ${REDIS_APPENDONLY}
+      --maxmemory ${REDIS_MAXMEMORY}
+      --maxmemory-policy ${REDIS_MAXMEMORY_POLICY}
+      ${APP_REDIS_PASSWORD:+--requirepass $APP_REDIS_PASSWORD}
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: ${REDIS_HEALTHCHECK_INTERVAL}
+      timeout: ${REDIS_HEALTHCHECK_TIMEOUT}
+      retries: ${REDIS_HEALTHCHECK_RETRIES}
+    deploy:
+      resources:
+        limits:
+          memory: ${DOCKER_REDIS_MEMORY_LIMIT}
+    networks:
+      - antidetect
+
+volumes:
+  redis_data:
+    driver: local
+
+networks:
+  antidetect:
+    driver: bridge

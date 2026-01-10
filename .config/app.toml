@@ -1,0 +1,119 @@
+# Application Configuration
+# All values are required - missing values cause startup failure
+
+[application]
+name = "antidetect-playwright"
+version = "0.1.0"
+environment = "development"
+
+[browser]
+# Browser type: chromium, firefox, webkit
+type = "chromium"
+# Maximum concurrent browser contexts
+max_contexts = 50
+# Context timeout in seconds
+context_timeout = 300
+# Page load timeout in seconds
+page_timeout = 60
+# Use headless mode
+headless = true
+
+[stealth]
+# Enable stealth mode
+enabled = true
+# Hide webdriver flag
+hide_webdriver = true
+# Randomize navigator properties
+randomize_navigator = true
+# Override canvas fingerprint
+canvas_protection = true
+# Override WebGL fingerprint
+webgl_protection = true
+# Override audio context fingerprint
+audio_protection = true
+# Override client rects
+client_rects_protection = true
+# Human-like timing delays
+human_timing = true
+
+[fingerprint]
+# Screen resolutions to use
+screen_resolutions = [
+    { width = 1920, height = 1080 },
+    { width = 1366, height = 768 },
+    { width = 1536, height = 864 },
+    { width = 1440, height = 900 },
+    { width = 2560, height = 1440 },
+]
+# Languages to use
+languages = ["en-US", "en-GB", "de-DE", "fr-FR", "es-ES"]
+# Timezone IDs
+timezones = ["America/New_York", "Europe/London", "Europe/Berlin", "Asia/Tokyo"]
+# Platform strings
+platforms = ["Win32", "Linux x86_64", "MacIntel"]
+
+[proxy]
+# Enable proxy rotation
+rotation_enabled = true
+# Rotation strategy: round_robin, random, sticky
+rotation_strategy = "round_robin"
+# Proxy validation timeout in seconds
+validation_timeout = 10
+# Max retries on proxy failure
+max_retries = 3
+# Retry delay in seconds
+retry_delay = 5
+
+[task_runner]
+# Maximum concurrent tasks
+max_concurrent_tasks = 20
+# Task timeout in seconds
+task_timeout = 600
+# Retry failed tasks
+retry_on_failure = true
+# Max task retries
+max_task_retries = 3
+# Task queue size
+queue_size = 1000
+
+[redis]
+# Connection pool size
+pool_size = 20
+# Key prefix
+key_prefix = "adp"
+# Default TTL in seconds
+default_ttl = 3600
+# Connection timeout in seconds
+connection_timeout = 5
+
+[gui]
+# Window dimensions
+default_width = 1400
+default_height = 800
+min_width = 1200
+min_height = 700
+# Sidebar width
+sidebar_width = 220
+# Items per page in table
+items_per_page = 25
+# Theme: dark, light
+theme = "dark"
+# Enable Chrome-like theme for Camoufox browser
+enable_chrome_theme = true
+# Data directories
+data_dir = "data"
+browser_data_dir = "data/browser_data"
+settings_file = "data/settings.json"
+profiles_file = "data/profiles.json"
+
+[session]
+# Max attempts to generate unique fingerprint
+max_uniqueness_attempts = 100
+
+[human_behavior]
+# Delay between actions (milliseconds)
+delay_min_ms = 50
+delay_max_ms = 200
+# Scroll range (pixels)
+scroll_min_px = 100
+scroll_max_px = 500
