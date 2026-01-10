@@ -12,7 +12,7 @@
 ### Linux / macOS
 
 ```bash
-git clone https://github.com/antidetect/antidetect-playwright.git
+git clone https://github.com/arbitron-adm2/antidetect-playwright.git
 cd antidetect-playwright
 ./setup.sh
 ```
@@ -20,7 +20,7 @@ cd antidetect-playwright
 ### Windows
 
 ```cmd
-git clone https://github.com/antidetect/antidetect-playwright.git
+git clone https://github.com/arbitron-adm2/antidetect-playwright.git
 cd antidetect-playwright
 setup.bat
 ```
