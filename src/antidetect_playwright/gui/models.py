@@ -215,6 +215,9 @@ class AppSettings:
     window_x: int = -1  # -1 = center on screen
     window_y: int = -1
     sidebar_width: int = 220
+    # Browser settings
+    save_tabs: bool = True  # Save and restore browser tabs
+    start_page: str = "about:blank"  # Default start page
 
     def to_dict(self) -> dict:
         return {
@@ -226,6 +229,8 @@ class AppSettings:
             "window_x": self.window_x,
             "window_y": self.window_y,
             "sidebar_width": self.sidebar_width,
+            "save_tabs": self.save_tabs,
+            "start_page": self.start_page,
         }
 
     @classmethod
@@ -239,4 +244,6 @@ class AppSettings:
             window_x=data.get("window_x", -1),
             window_y=data.get("window_y", -1),
             sidebar_width=data.get("sidebar_width", 220),
+            save_tabs=data.get("save_tabs", True),
+            start_page=data.get("start_page", "about:blank"),
         )

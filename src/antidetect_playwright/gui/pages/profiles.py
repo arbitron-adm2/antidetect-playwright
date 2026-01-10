@@ -96,7 +96,6 @@ class ProfilesPage(QWidget):
         sidebar = QFrame()
         sidebar.setObjectName("sidebar")
         sidebar.setMinimumWidth(200)
-        sidebar.setMaximumWidth(280)
 
         layout = QVBoxLayout(sidebar)
         layout.setContentsMargins(0, SPACING.lg, 0, SPACING.lg)

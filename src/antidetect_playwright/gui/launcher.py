@@ -9,6 +9,8 @@ import asyncio
 
 from playwright.async_api import Page, BrowserContext
 from camoufox.async_api import AsyncCamoufox
+from camoufox.utils import launch_options as camoufox_launch_options
+import orjson
 
 from .models import BrowserProfile, ProfileStatus
 
@@ -17,12 +19,90 @@ logger = logging.getLogger(__name__)
 # Path to bundled Chrome theme (Material Fox)
 CHROME_THEME_DIR = Path(__file__).parent.parent / "resources" / "chrome" / "chrome"
 
+# Screen/window dimension keys that should NOT be persisted or spoofed
+# These values are spoofed by Camoufox via JavaScript API overrides
+# If we set them, window/screen dimensions return constants
+# regardless of actual window size = broken scaling!
+SCREEN_WINDOW_KEYS_TO_EXCLUDE = {
+    # Window dimensions
+    "window.outerWidth",
+    "window.outerHeight",
+    "window.innerWidth",
+    "window.innerHeight",
+    "window.screenX",
+    "window.screenY",
+    # Screen dimensions - let browser use real screen
+    "screen.width",
+    "screen.height",
+    "screen.availWidth",
+    "screen.availHeight",
+    "screen.availTop",
+    "screen.availLeft",
+    "screen.colorDepth",
+    "screen.pixelDepth",
+    # Document body dimensions
+    "document.body.clientWidth",
+    "document.body.clientHeight",
+}
+
+
+def _remove_screen_window_keys_from_env(env: dict) -> dict:
+    """Remove screen/window keys from CAMOU_CONFIG_* env vars.
+    
+    Camoufox serializes config into CAMOU_CONFIG_1, CAMOU_CONFIG_2, etc.
+    We need to deserialize, remove keys, and re-serialize.
+    """
+    # Collect all CAMOU_CONFIG chunks
+    chunks = []
+    i = 1
+    while f"CAMOU_CONFIG_{i}" in env:
+        chunks.append(env[f"CAMOU_CONFIG_{i}"])
+        i += 1
+    
+    if not chunks:
+        return env
+    
+    # Reconstruct full config JSON
+    full_config_str = "".join(chunks)
+    try:
+        config = orjson.loads(full_config_str)
+    except Exception as e:
+        logger.warning(f"Failed to parse CAMOU_CONFIG: {e}")
+        return env
+    
+    # Remove screen/window keys
+    removed = []
+    for key in list(config.keys()):
+        if key in SCREEN_WINDOW_KEYS_TO_EXCLUDE:
+            del config[key]
+            removed.append(key)
+    
+    if removed:
+        logger.debug(f"Removed screen/window keys from config: {removed}")
+    
+    # Re-serialize
+    new_config_str = orjson.dumps(config).decode('utf-8')
+    
+    # Clear old chunks
+    for j in range(1, i):
+        del env[f"CAMOU_CONFIG_{j}"]
+    
+    # Split into new chunks (same chunk size logic as Camoufox)
+    import sys
+    chunk_size = 2047 if sys.platform == 'win32' else 32767
+    for j, start in enumerate(range(0, len(new_config_str), chunk_size)):
+        chunk = new_config_str[start:start + chunk_size]
+        env[f"CAMOU_CONFIG_{j + 1}"] = chunk
+    
+    return env
+
 
 class BrowserLauncher:
     """Manages browser instances using Camoufox with automatic fingerprinting."""
 
-    def __init__(self, data_dir: Path):
+    def __init__(self, data_dir: Path, settings=None):
         self._data_dir = data_dir
+        self._settings = settings  # AppSettings for browser config
         self._browsers: dict[str, AsyncCamoufox] = {}
         self._browser_instances: dict[str, BrowserContext] = {}
         self._pages: dict[str, Page] = {}
@@ -72,16 +152,25 @@ class BrowserLauncher:
             logger.debug("Proxy: %s", proxy)
             logger.debug("Data dir: %s", user_data_dir)
 
-            # Camoufox options - everything is auto-configured!
+            # Camoufox options - maximum protection
             camoufox_options = {
                 "headless": False,
                 # GeoIP auto-detects timezone/locale from proxy IP
                 "geoip": proxy is not None,
                 # Block WebRTC to prevent IP leak
                 "block_webrtc": True,
+                # Human-like cursor movement (critical for antidetect!)
+                "humanize": 1.5,
+                # Disable Cross-Origin-Opener-Policy for Turnstile/Cloudflare
+                "disable_coop": True,
+                # Suppress warnings for intentional settings
+                "i_know_what_im_doing": True,
                 # Persistent storage for cookies/localStorage
                 "persistent_context": True,
                 "user_data_dir": str(user_data_dir),
+                # CRITICAL: Disable fixed viewport so browser content scales with window!
+                # By default Playwright sets 1280x720 fixed viewport
+                "no_viewport": True,
                 # Enable Chrome theme (Material Fox userChrome.css)
                 "firefox_user_prefs": {
                     # Enable Chrome theme (userChrome.css)
@@ -90,6 +179,22 @@ class BrowserLauncher:
                     "browser.tabs.tabClipWidth": 83,
                     # Show "Not Secure" on HTTP like Chrome
                     "security.insecure_connection_text.enabled": True,
+                    # Session restore settings - controlled by save_tabs
+                    **(
+                        {
+                            "browser.startup.page": 3,  # 3 = restore previous session
+                            "browser.sessionstore.resume_from_crash": True,
+                            "browser.sessionstore.max_resumed_crashes": 3,
+                        }
+                        if (
+                            self._settings
+                            and getattr(self._settings, "save_tabs", True)
+                        )
+                        else {
+                            "browser.startup.page": 0,  # 0 = blank page
+                            "browser.sessionstore.max_resumed_crashes": 0,
+                        }
+                    ),
                 },
             }
 
@@ -102,24 +207,177 @@ class BrowserLauncher:
                 "macos": "macos",
                 "linux": "linux",
             }
+            # Short OS codes for WebGL lookup
+            os_short_map = {
+                "windows": "win",
+                "macos": "mac",
+                "linux": "lin",
+            }
             if profile.os_type in os_map:
                 camoufox_options["os"] = [os_map[profile.os_type]]
 
-            # Create and launch Camoufox
-            camoufox = AsyncCamoufox(**camoufox_options)
+            # CRITICAL: Save complete fingerprint config to avoid detection!
+            # Same profile must have same fingerprint across sessions
+            # We save:
+            # - fingerprint: navigator, screen, headers from BrowserForge
+            # - webgl: GPU vendor/renderer
+            # - canvas: anti-aliasing offset for Canvas fingerprint
+            # - fonts: spacing seed for font fingerprint
+            # - history: window.history.length
+            # Without these, each launch would have different fingerprints but same cookies = 100% detection!
+            #
+            # IMPORTANT: We use `config=` parameter, NOT `fingerprint=`!
+            # - fingerprint= expects a Fingerprint dataclass object
+            # - config= accepts a dict that gets merged with generated fingerprint
+            # - merge_into() only sets keys that don't exist, so our values are preserved
+            # NOTE: Screen/window keys are removed later via _remove_screen_window_keys_from_env()
+
+            fingerprint_file = user_data_dir / "fingerprint.json"
+            if fingerprint_file.exists():
+                # Load saved fingerprint config
+                fp_data = json.loads(fingerprint_file.read_text())
+                fp_config = fp_data.get("fingerprint", {})
+
+                # Remove screen/window dimension keys so Camoufox uses real sizes
+                for key in list(fp_config.keys()):
+                    if key in SCREEN_WINDOW_KEYS_TO_EXCLUDE:
+                        del fp_config[key]
+
+                # Restore random values that Camoufox normally generates
+                # These are set via set_into() which only sets if key not exists
+                if "canvas" in fp_data:
+                    fp_config["canvas:aaOffset"] = fp_data["canvas"]["aaOffset"]
+                if "fonts" in fp_data:
+                    fp_config["fonts:spacing_seed"] = fp_data["fonts"]["spacing_seed"]
+                if "history_length" in fp_data:
+                    fp_config["window.history.length"] = fp_data["history_length"]
+
+                # Pass config dict - Camoufox will generate new fingerprint but
+                # merge_into() won't overwrite our existing keys!
+                camoufox_options["config"] = fp_config
+
+                # Restore WebGL config to maintain GPU fingerprint
+                webgl = fp_data.get("webgl")
+                if webgl:
+                    camoufox_options["webgl_config"] = (
+                        webgl["vendor"],
+                        webgl["renderer"],
+                    )
+                logger.info(f"Loaded fingerprint config from {fingerprint_file}")
+            else:
+                # Generate new fingerprint and convert to config
+                from browserforge.fingerprints import FingerprintGenerator
+                from camoufox.fingerprints import from_browserforge
+                from camoufox.webgl import sample_webgl
+                from random import randint, randrange
+
+                generator = FingerprintGenerator(
+                    browser="firefox",
+                    os=camoufox_options.get("os", ["windows", "macos", "linux"]),
+                )
+                fingerprint = generator.generate()
+                # Convert to Camoufox config dict
+                fp_config = from_browserforge(fingerprint)
+
+                # Generate random values that Camoufox would generate
+                # We pre-generate them so we can save and restore later
+                canvas_aa_offset = randint(-50, 50)
+                fonts_spacing_seed = randint(0, 1_073_741_823)
+                history_length = randrange(1, 6)
+
+                # Add to config so Camoufox won't overwrite
+                fp_config["canvas:aaOffset"] = canvas_aa_offset
+                fp_config["fonts:spacing_seed"] = fonts_spacing_seed
+                fp_config["window.history.length"] = history_length
+
+                # Remove screen/window dimension keys so Camoufox uses real sizes
+                for key in list(fp_config.keys()):
+                    if key in SCREEN_WINDOW_KEYS_TO_EXCLUDE:
+                        del fp_config[key]
+
+                # Pass as config dict for first launch too (for consistency)
+                camoufox_options["config"] = fp_config
+
+                # Generate WebGL fingerprint
+                os_short = os_short_map.get(profile.os_type, "win")
+                webgl_fp = sample_webgl(os_short)
+                webgl_vendor = webgl_fp["webGl:vendor"]
+                webgl_renderer = webgl_fp["webGl:renderer"]
+                camoufox_options["webgl_config"] = (webgl_vendor, webgl_renderer)
+
+                # Save complete fingerprint data
+                fp_data = {
+                    "fingerprint": fp_config,
+                    "webgl": {
+                        "vendor": webgl_vendor,
+                        "renderer": webgl_renderer,
+                    },
+                    "canvas": {
+                        "aaOffset": canvas_aa_offset,
+                    },
+                    "fonts": {
+                        "spacing_seed": fonts_spacing_seed,
+                    },
+                    "history_length": history_length,
+                    "os": profile.os_type,
+                }
+                fingerprint_file.write_text(json.dumps(fp_data, indent=2, default=str))
+                logger.info(
+                    f"Generated and saved new fingerprint config to {fingerprint_file}"
+                )
+
+            # Create launch options manually to remove screen/window keys
+            # This is needed because Camoufox generates these inside launch_options()
+            # and we need to remove them AFTER generation but BEFORE launching
+            from functools import partial
+            
+            # Extract persistent_context flag - it's handled separately by AsyncCamoufox
+            persistent_context = camoufox_options.pop("persistent_context", False)
+            
+            # Generate launch options
+            from_options = await asyncio.get_event_loop().run_in_executor(
+                None,
+                partial(camoufox_launch_options, **camoufox_options),
+            )
+            
+            # CRITICAL: Remove screen/window keys from CAMOU_CONFIG env vars
+            # This allows the browser to use real window/screen dimensions
+            from_options["env"] = _remove_screen_window_keys_from_env(from_options["env"])
+            
+            # Add no_viewport for Playwright - let content scale with window
+            from_options["no_viewport"] = True
+
+            # Create and launch Camoufox with pre-generated options
+            camoufox = AsyncCamoufox(
+                from_options=from_options,
+                persistent_context=persistent_context,
+            )
             context = await camoufox.__aenter__()
 
             self._browsers[profile.id] = camoufox
             self._browser_instances[profile.id] = context
 
-            # Restore browser state if exists (creates tabs)
-            await self._restore_browser_state(profile.id, context)
-
-            # Get page after restoration (use last opened tab or create new)
+            # Get page (Firefox will restore tabs automatically if enabled)
             if context.pages:
-                page = context.pages[-1]  # Use last opened tab
+                page = context.pages[-1]
             else:
                 page = await context.new_page()
+
+            # Navigate to start page if settings exist and page is blank
+            if self._settings and page.url == "about:blank":
+                start_page = self._settings.start_page or "about:blank"
+                if start_page != "about:blank":
+                    # Add https:// if no protocol specified
+                    if not start_page.startswith(
+                        ("http://", "https://", "about:", "file://")
+                    ):
+                        start_page = "https://" + start_page
+                    try:
+                        await page.goto(
+                            start_page, wait_until="domcontentloaded", timeout=10000
+                        )
+                    except Exception as e:
+                        logger.warning(f"Failed to load start page {start_page}: {e}")
 
             self._pages[profile.id] = page
 
@@ -145,7 +403,8 @@ class BrowserLauncher:
         except Exception:
             pass
         finally:
-            # Browser was closed manually - just cleanup (cookies already saved by persistent_context)
+            # Browser was closed manually - just cleanup
+            logger.info(f"Browser closed for profile {profile_id}")
             if profile_id in self._browser_instances:
                 await self._cleanup_profile(profile_id)
                 if self._on_browser_closed:
@@ -244,11 +503,7 @@ class BrowserLauncher:
     async def stop_profile(self, profile_id: str) -> bool:
         """Stop browser for profile."""
         try:
-            # Save state before closing
-            if profile_id in self._browser_instances:
-                context = self._browser_instances[profile_id]
-                await self._save_browser_state(profile_id, context)
-
+            # Firefox saves sessions automatically via sessionstore.jsonlz4
             if profile_id in self._browsers:
                 camoufox = self._browsers[profile_id]
                 try:

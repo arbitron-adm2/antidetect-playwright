@@ -44,6 +44,8 @@ from .dialogs import (
     TagsEditDialog,
     NotesEditDialog,
     ProxyPoolDialog,
+    SettingsDialog,
+    FingerprintDialog,
 )
 from .proxy_utils import ping_proxy, detect_proxy_geo
 from .components import MiniSidebar
@@ -58,7 +60,7 @@ class MainWindow(QMainWindow):
 
         self.storage = Storage("data")
         self.settings = self.storage.get_settings()
-        self.launcher = BrowserLauncher(Path("data/browser_data"))
+        self.launcher = BrowserLauncher(Path("data/browser_data"), self.settings)
 
         # State
         self.current_folder = ""
@@ -92,6 +94,7 @@ class MainWindow(QMainWindow):
         # Mini sidebar (icon navigation)
         self.mini_sidebar = MiniSidebar()
         self.mini_sidebar.page_changed.connect(self._switch_page)
+        self.mini_sidebar.settings_clicked.connect(self._show_settings)
         main_layout.addWidget(self.mini_sidebar)
 
         # Main pages stack
@@ -359,6 +362,14 @@ class MainWindow(QMainWindow):
             self.storage.add_folder(folder)
             self._refresh_folders()
 
+    def _show_settings(self):
+        """Show settings dialog."""
+        dialog = SettingsDialog(self.settings, parent=self)
+        if dialog.exec():
+            # Save updated settings (settings object is modified in-place)
+            self.storage.save_settings()
+            # Settings will be applied on next browser launch
+
     def _show_folder_menu(self, folder_id: str, pos):
         """Show folder context menu."""
         menu = QMenu(self)
@@ -425,6 +436,10 @@ class MainWindow(QMainWindow):
         edit_action = menu.addAction("Edit")
         edit_action.triggered.connect(lambda: self._edit_profile(profile))
 
+        # View Profile Data (fingerprint, cookies, storage, etc.)
+        data_action = menu.addAction("📋 View Profile Data")
+        data_action.triggered.connect(lambda: self._view_fingerprint(profile))
+
         duplicate_action = menu.addAction("Duplicate")
         duplicate_action.triggered.connect(lambda: self._duplicate_profile(profile))
 
@@ -459,6 +474,12 @@ class MainWindow(QMainWindow):
         delete_action.triggered.connect(lambda: self._delete_profile(profile))
 
         menu.exec(pos)
+
+    def _view_fingerprint(self, profile: BrowserProfile):
+        """Show fingerprint dialog for profile."""
+        data_dir = self.storage._data_dir / "browser_data"
+        dialog = FingerprintDialog(profile, data_dir, parent=self)
+        dialog.exec()
 
     def _edit_profile(self, profile: BrowserProfile):
         """Edit profile."""
