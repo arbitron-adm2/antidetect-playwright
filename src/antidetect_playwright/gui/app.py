@@ -6,6 +6,7 @@ import asyncio
 import warnings
 from datetime import datetime
 from pathlib import Path
+import logging
 
 # Suppress warnings
 os.environ["QT_ACCESSIBILITY"] = "0"
@@ -18,18 +19,20 @@ from PyQt6.QtWidgets import (
     QWidget,
     QVBoxLayout,
     QHBoxLayout,
+    QPushButton,
     QTableWidgetItem,
     QMessageBox,
     QMenu,
     QStackedWidget,
 )
-from PyQt6.QtCore import Qt
+from PyQt6.QtCore import Qt, QSize
 import qasync
 
 from .models import BrowserProfile, ProfileStatus
-from .storage import Storage
+from .storage import Storage, StorageError, ProfileNotFoundError
 from .launcher import BrowserLauncher
 from .theme import Theme
+from .icons import get_icon
 from .security import install_secure_logging
 from .widgets import (
     StatusBadge,
@@ -117,6 +120,11 @@ class MainWindow(QMainWindow):
         self.tags_page.tag_created.connect(self._on_tag_created)
         self.tags_page.tag_deleted.connect(self._on_tag_deleted)
         self.tags_page.tag_renamed.connect(self._on_tag_renamed)
+        self.tags_page.status_created.connect(self._on_status_created)
+        self.tags_page.status_renamed.connect(self._on_status_renamed)
+        self.tags_page.status_deleted.connect(self._on_status_deleted)
+        self.tags_page.note_template_created.connect(self._on_note_template_created)
+        self.tags_page.note_template_deleted.connect(self._on_note_template_deleted)
         self._connect_tags_page_signals()
         self.pages_stack.addWidget(self.tags_page)
 
@@ -126,6 +134,42 @@ class MainWindow(QMainWindow):
         self.pages_stack.addWidget(self.trash_page)
 
         main_layout.addWidget(self.pages_stack, 1)
+
+    def _safe_get_profile(self, profile_id: str) -> BrowserProfile | None:
+        """Get profile by id without letting storage exceptions crash the UI."""
+        try:
+            return self.storage.get_profile(profile_id)
+        except (ValueError, ProfileNotFoundError, StorageError) as e:
+            logging.getLogger(__name__).warning("Failed to get profile %s: %s", profile_id, e)
+            return None
+
+    def _spawn_task(self, coro, context: str) -> None:
+        """Run coroutine in the background and log exceptions.
+
+        Note: we keep this local to the window to avoid silent task failures.
+        """
+        try:
+            task = asyncio.create_task(coro)
+        except RuntimeError as e:
+            logging.getLogger(__name__).warning("Cannot start task (%s): %s", context, e)
+            return
+
+        def _done(t: asyncio.Task) -> None:
+            try:
+                exc = t.exception()
+            except asyncio.CancelledError:
+                return
+            except Exception as e:
+                logging.getLogger(__name__).warning(
+                    "Task exception retrieval failed (%s): %s", context, e
+                )
+                return
+            if exc:
+                logging.getLogger(__name__).exception(
+                    "Background task failed (%s)", context, exc_info=exc
+                )
+
+        task.add_done_callback(_done)
 
     def _connect_profiles_page_signals(self):
         """Connect signals from profiles page."""
@@ -165,7 +209,6 @@ class MainWindow(QMainWindow):
         self.trash_page.permanent_delete_requested.connect(
             self._permanently_delete_profiles
         )
-        self.trash_page.empty_trash_requested.connect(self._empty_trash)
 
     def _switch_page(self, index: int):
         """Switch to page by index."""
@@ -202,6 +245,8 @@ class MainWindow(QMainWindow):
 
     def _refresh_table(self):
         """Refresh profiles table."""
+        selected_profile_ids = set(self.profiles_page.get_selected_profile_ids())
+
         # Get filtered profiles
         profiles = self.storage.get_profiles(
             folder_id=self.current_folder,
@@ -239,7 +284,9 @@ class MainWindow(QMainWindow):
                 profile.status = ProfileStatus.RUNNING
 
             # Checkbox column (index 0)
-            self.profiles_page.add_checkbox_to_row(row)
+            self.profiles_page.add_checkbox_to_row(
+                row, checked=profile.id in selected_profile_ids
+            )
 
             # Name column with OS icon and Start/Stop (index 1)
             name_widget = ProfileNameWidget(profile)
@@ -247,35 +294,115 @@ class MainWindow(QMainWindow):
                 lambda p=profile: self._start_profile(p)
             )
             name_widget.stop_requested.connect(lambda p=profile: self._stop_profile(p))
+            name_widget.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+            name_widget.customContextMenuRequested.connect(
+                lambda _pos, p=profile, w=name_widget: self._show_profile_context_menu(
+                    p, w.mapToGlobal(w.rect().bottomLeft())
+                )
+            )
             table.setCellWidget(row, 1, name_widget)
 
             # Status (index 2)
             status_badge = StatusBadge(profile.status)
+            status_badge.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+            status_badge.customContextMenuRequested.connect(
+                lambda _pos, p=profile, w=status_badge: self._show_profile_context_menu(
+                    p, w.mapToGlobal(w.rect().bottomLeft())
+                )
+            )
             table.setCellWidget(row, 2, status_badge)
 
             # Notes (index 3)
             notes_widget = NotesWidget(profile.notes)
             notes_widget.edit_requested.connect(lambda p=profile: self._edit_notes(p))
+            notes_widget.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+            notes_widget.customContextMenuRequested.connect(
+                lambda _pos, p=profile, w=notes_widget: self._show_profile_context_menu(
+                    p, w.mapToGlobal(w.rect().bottomLeft())
+                )
+            )
             table.setCellWidget(row, 3, notes_widget)
 
             # Tags (index 4)
             tags_widget = TagsWidget(profile.tags)
             tags_widget.tag_clicked.connect(self._on_tag_filter)
             tags_widget.edit_requested.connect(lambda p=profile: self._edit_tags(p))
+            tags_widget.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+            tags_widget.customContextMenuRequested.connect(
+                lambda _pos, p=profile, w=tags_widget: self._show_profile_context_menu(
+                    p, w.mapToGlobal(w.rect().bottomLeft())
+                )
+            )
             table.setCellWidget(row, 4, tags_widget)
 
             # Proxy (index 5)
             proxy_widget = ProxyWidget(profile.proxy)
-            proxy_widget.ping_requested.connect(lambda p=profile: self._ping_proxy(p))
-            proxy_widget.change_requested.connect(
-                lambda p=profile: self._quick_change_proxy(p)
+            proxy_widget.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+            proxy_widget.customContextMenuRequested.connect(
+                lambda _pos, p=profile, w=proxy_widget: self._show_profile_context_menu(
+                    p, w.mapToGlobal(w.rect().bottomLeft())
+                )
             )
             table.setCellWidget(row, 5, proxy_widget)
+
+            # Actions (index 6)
+            actions_widget = QWidget()
+            actions_widget.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+            actions_widget.customContextMenuRequested.connect(
+                lambda _pos, p=profile, w=actions_widget: self._show_profile_context_menu(
+                    p, w.mapToGlobal(w.rect().bottomLeft())
+                )
+            )
+            actions_layout = QHBoxLayout(actions_widget)
+            actions_layout.setContentsMargins(4, 0, 4, 0)
+            actions_layout.setSpacing(4)
+            actions_layout.setAlignment(Qt.AlignmentFlag.AlignVCenter)
+
+            btn_size = Theme.BTN_ICON_SIZE
+
+            menu_btn = QPushButton("⋯")
+            menu_btn.setFixedSize(btn_size, btn_size)
+            menu_btn.setProperty("class", "icon")
+            menu_btn.setToolTip("Menu")
+            menu_btn.clicked.connect(
+                lambda checked=False, p=profile, w=menu_btn: self._show_profile_context_menu(
+                    p, w.mapToGlobal(w.rect().bottomLeft())
+                )
+            )
+            actions_layout.addWidget(menu_btn)
+
+            ping_btn = QPushButton()
+            ping_btn.setIcon(get_icon("ping", 14))
+            ping_btn.setIconSize(QSize(14, 14))
+            ping_btn.setFixedSize(btn_size, btn_size)
+            ping_btn.setProperty("class", "icon")
+            ping_btn.setToolTip("Ping")
+            ping_btn.clicked.connect(lambda checked=False, p=profile: self._ping_proxy(p))
+            ping_btn.setEnabled(bool(profile.proxy and profile.proxy.enabled))
+            actions_layout.addWidget(ping_btn)
+
+            change_btn = QPushButton()
+            change_btn.setIcon(get_icon("swap", 14))
+            change_btn.setIconSize(QSize(14, 14))
+            change_btn.setFixedSize(btn_size, btn_size)
+            change_btn.setProperty("class", "icon")
+            change_btn.setToolTip("Quick change proxy")
+            change_btn.clicked.connect(
+                lambda checked=False, p=profile: self._quick_change_proxy(p)
+            )
+            actions_layout.addWidget(change_btn)
+
+            actions_layout.addStretch()
+            table.setCellWidget(row, 6, actions_widget)
 
             # Store profile ID in Name column (index 1)
             item = QTableWidgetItem()
             item.setData(Qt.ItemDataRole.UserRole, profile.id)
             table.setItem(row, 1, item)
+
+        # Keep toolbar + header checkbox state consistent after rebuild
+        self.profiles_page._update_selection()
+        self.profiles_page._update_header_checkbox_state()
 
     def _refresh_tags(self):
         """Refresh tag filters."""
@@ -289,6 +416,10 @@ class MainWindow(QMainWindow):
             tag_counts[tag] = count
 
         self.tags_page.update_tags(tags, tag_counts)
+
+        # Unified labels pool: also refresh custom statuses and note templates
+        self.tags_page.update_statuses(self.storage.get_statuses_pool())
+        self.tags_page.update_note_templates(self.storage.get_note_templates_pool())
 
     # === Actions ===
 
@@ -415,8 +546,8 @@ class MainWindow(QMainWindow):
             return
 
         profile_id = item.data(Qt.ItemDataRole.UserRole)
-        profile = self.storage.get_profile(profile_id)
-        if not profile:
+        profile = self._safe_get_profile(profile_id)
+        if profile is None:
             return
 
         self._show_profile_context_menu(profile, pos)
@@ -478,7 +609,7 @@ class MainWindow(QMainWindow):
 
     def _view_fingerprint(self, profile: BrowserProfile):
         """Show fingerprint dialog for profile."""
-        data_dir = self.storage._data_dir / "browser_data"
+        data_dir = self.storage.get_browser_data_dir()
         dialog = ProfileDataDialog(profile, data_dir, parent=self)
         dialog.exec()
 
@@ -546,23 +677,27 @@ class MainWindow(QMainWindow):
 
     def _on_status_change(self, profile_id: str, status: ProfileStatus):
         """Handle status change from launcher."""
-        profile = self.storage.get_profile(profile_id)
-        if profile:
+        profile = self._safe_get_profile(profile_id)
+        if profile is not None:
             profile.status = status
             self.storage.update_profile(profile)
         self._refresh_table()
 
     def _on_browser_closed(self, profile_id: str):
         """Handle browser manually closed."""
-        profile = self.storage.get_profile(profile_id)
-        if profile:
+        profile = self._safe_get_profile(profile_id)
+        if profile is not None:
             profile.status = ProfileStatus.STOPPED
             self.storage.update_profile(profile)
         self._refresh_table()
 
     def _edit_notes(self, profile: BrowserProfile):
         """Edit profile notes."""
-        dialog = NotesEditDialog(profile.notes, parent=self)
+        dialog = NotesEditDialog(
+            profile.notes,
+            note_templates=self.storage.get_note_templates_pool(),
+            parent=self,
+        )
         if dialog.exec():
             profile.notes = dialog.get_notes()
             self.storage.update_profile(profile)
@@ -619,13 +754,11 @@ class MainWindow(QMainWindow):
         pool = self.storage.get_proxy_pool()
         dialog = ProxyPoolDialog(pool.proxies, parent=self)
         if dialog.exec():
-            self.storage._proxy_pool.proxies = dialog.get_proxies()
-            self.storage.save_proxy_pool()
+            self.storage.set_proxy_pool(dialog.get_proxies())
 
     def _on_proxy_pool_changed(self, proxies: list):
         """Handle proxy pool changes from proxy page."""
-        self.storage._proxy_pool.proxies = proxies
-        self.storage.save_proxy_pool()
+        self.storage.set_proxy_pool(proxies)
 
     def _on_tag_created(self, tag: str):
         """Handle tag creation - add to pool."""
@@ -653,31 +786,53 @@ class MainWindow(QMainWindow):
         self._refresh_table()
         self._refresh_tags()
 
+    def _on_status_created(self, name: str, color: str):
+        """Handle custom status creation - persist to pool."""
+        self.storage.add_status_to_pool(name, color)
+        self.tags_page.update_statuses(self.storage.get_statuses_pool())
+
+    def _on_status_renamed(self, old_name: str, new_name: str, color: str):
+        """Handle custom status rename - persist to pool."""
+        self.storage.rename_status_in_pool(old_name, new_name, color)
+        self.tags_page.update_statuses(self.storage.get_statuses_pool())
+
+    def _on_status_deleted(self, name: str):
+        """Handle custom status deletion - persist to pool."""
+        self.storage.remove_status_from_pool(name)
+        self.tags_page.update_statuses(self.storage.get_statuses_pool())
+
+    def _on_note_template_created(self, name: str, content: str):
+        """Handle note template creation - persist to pool."""
+        self.storage.add_note_template_to_pool(name, content)
+        self.tags_page.update_note_templates(self.storage.get_note_templates_pool())
+
+    def _on_note_template_deleted(self, name: str):
+        """Handle note template deletion - persist to pool."""
+        self.storage.remove_note_template_from_pool(name)
+        self.tags_page.update_note_templates(self.storage.get_note_templates_pool())
+
     # === Batch operations ===
 
     def _batch_start_profiles(self, profile_ids: list[str]):
         """Start multiple profiles."""
         for pid in profile_ids:
-            profile = self.storage.get_profile(pid)
-            if profile:
+            profile = self._safe_get_profile(pid)
+            if profile is not None:
                 self._start_profile(profile)
-        self.profiles_page._deselect_all()
 
     def _batch_stop_profiles(self, profile_ids: list[str]):
         """Stop multiple profiles."""
         for pid in profile_ids:
-            profile = self.storage.get_profile(pid)
-            if profile:
+            profile = self._safe_get_profile(pid)
+            if profile is not None:
                 self._stop_profile(profile)
-        self.profiles_page._deselect_all()
 
     def _batch_tag_profiles(self, profile_ids: list[str]):
         """Set tags for multiple profiles."""
         if not profile_ids:
             return
         # Use first profile for dialog, apply to all
-        profiles = [self.storage.get_profile(pid) for pid in profile_ids]
-        profiles = [p for p in profiles if p]
+        profiles = [p for pid in profile_ids if (p := self._safe_get_profile(pid)) is not None]
         if not profiles:
             return
 
@@ -689,33 +844,33 @@ class MainWindow(QMainWindow):
                 self.storage.update_profile(profile)
             self._refresh_table()
             self._refresh_tags()
-        self.profiles_page._deselect_all()
 
     def _batch_notes_profiles(self, profile_ids: list[str]):
         """Set notes for multiple profiles."""
         if not profile_ids:
             return
-        profiles = [self.storage.get_profile(pid) for pid in profile_ids]
-        profiles = [p for p in profiles if p]
+        profiles = [p for pid in profile_ids if (p := self._safe_get_profile(pid)) is not None]
         if not profiles:
             return
 
-        dialog = NotesEditDialog("", self)
+        dialog = NotesEditDialog(
+            "",
+            note_templates=self.storage.get_note_templates_pool(),
+            parent=self,
+        )
         if dialog.exec():
             new_notes = dialog.get_notes()
             for profile in profiles:
                 profile.notes = new_notes
                 self.storage.update_profile(profile)
             self._refresh_table()
-        self.profiles_page._deselect_all()
 
     def _batch_ping_profiles(self, profile_ids: list[str]):
         """Ping proxies for multiple profiles."""
         for pid in profile_ids:
-            profile = self.storage.get_profile(pid)
-            if profile and profile.proxy.enabled:
+            profile = self._safe_get_profile(pid)
+            if profile is not None and profile.proxy.enabled:
                 self._ping_proxy(profile)
-        self.profiles_page._deselect_all()
 
     def _batch_delete_profiles(self, profile_ids: list[str]):
         """Delete multiple profiles."""
@@ -730,14 +885,17 @@ class MainWindow(QMainWindow):
         )
         if reply == QMessageBox.StandardButton.Yes:
             for pid in profile_ids:
-                profile = self.storage.get_profile(pid)
-                if profile:
+                profile = self._safe_get_profile(pid)
+                if profile is not None:
                     self._stop_profile(profile)
+                try:
                     self.storage.delete_profile(pid)
+                except (ValueError, ProfileNotFoundError, StorageError) as e:
+                    logging.getLogger(__name__).warning("Failed to delete profile %s: %s", pid, e)
             self._refresh_folders()
             self._refresh_table()
             self._refresh_trash()
-        self.profiles_page._deselect_all()
+            self.profiles_page._deselect_all()
 
     # --- Trash operations ---
 
@@ -774,25 +932,21 @@ class MainWindow(QMainWindow):
         proxies = self.proxy_page.get_proxies()
         selected_proxies = [proxies[i] for i in indices if i < len(proxies)]
         if selected_proxies:
-            asyncio.ensure_future(self._do_batch_ping_proxies(selected_proxies))
-        self.proxy_page._deselect_all()
+            self._spawn_task(
+                self._do_batch_ping_proxies(selected_proxies),
+                context=f"batch_ping_proxies({len(selected_proxies)})",
+            )
 
     async def _do_batch_ping_proxies(self, proxies: list):
         """Perform batch proxy ping."""
-        from antidetect_playwright.integrations.proxy_check import (
-            ping_proxy,
-            detect_proxy_geo,
-        )
-
         async def ping_one(proxy) -> None:
             ping_ms = await ping_proxy(proxy)
-            if ping_ms > 0:
-                proxy.ping_ms = ping_ms
-                if not proxy.country_code:
-                    geo = await detect_proxy_geo(proxy)
-                    if geo:
-                        proxy.country_code = geo.get("country_code", "")
-                        proxy.country_name = geo.get("country_name", "")
+            proxy.ping_ms = ping_ms
+            if ping_ms > 0 and not proxy.country_code:
+                geo = await detect_proxy_geo(proxy)
+                if geo:
+                    proxy.country_code = geo.get("country_code", "")
+                    proxy.country_name = geo.get("country_name", "")
 
         tasks = [ping_one(p) for p in proxies]
         await asyncio.gather(*tasks, return_exceptions=True)
@@ -817,7 +971,7 @@ class MainWindow(QMainWindow):
                     proxies.pop(idx)
             self.proxy_page.update_proxies(proxies)
             self.proxy_page.proxy_pool_changed.emit(proxies)
-        self.proxy_page._deselect_all()
+            self.proxy_page._deselect_all()
 
     # --- Tags batch operations ---
 
@@ -834,10 +988,14 @@ class MainWindow(QMainWindow):
         )
         if reply == QMessageBox.StandardButton.Yes:
             for tag in tag_names:
-                self.storage.delete_tag(tag)
+                self.storage.remove_tag_from_pool(tag)
+                for profile in self.storage.get_profiles():
+                    if tag in profile.tags:
+                        profile.tags.remove(tag)
+                        self.storage.update_profile(profile)
             self._refresh_tags()
             self._refresh_table()
-        self.tags_page._deselect_all_tags()
+            self.tags_page._deselect_all_tags()
 
     def _batch_delete_statuses(self, status_names: list[str]):
         """Delete selected statuses."""
@@ -851,11 +1009,10 @@ class MainWindow(QMainWindow):
             QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
         )
         if reply == QMessageBox.StandardButton.Yes:
-            statuses = self.tags_page.statuses
             for name in status_names:
-                statuses = [(n, c) for n, c in statuses if n != name]
-            self.tags_page.update_statuses(statuses)
-        self.tags_page._deselect_all_statuses()
+                self.storage.remove_status_from_pool(name)
+            self.tags_page.update_statuses(self.storage.get_statuses_pool())
+            self.tags_page._deselect_all_statuses()
 
     def _batch_delete_templates(self, template_names: list[str]):
         """Delete selected note templates."""
@@ -869,11 +1026,10 @@ class MainWindow(QMainWindow):
             QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
         )
         if reply == QMessageBox.StandardButton.Yes:
-            templates = self.tags_page.note_templates
             for name in template_names:
-                templates = [(n, c) for n, c in templates if n != name]
-            self.tags_page.update_note_templates(templates)
-        self.tags_page._deselect_all_templates()
+                self.storage.remove_note_template_from_pool(name)
+            self.tags_page.update_note_templates(self.storage.get_note_templates_pool())
+            self.tags_page._deselect_all_templates()
 
     def closeEvent(self, event):
         """Handle window close with graceful browser shutdown."""
@@ -886,16 +1042,9 @@ class MainWindow(QMainWindow):
 
         # Graceful shutdown all running browsers
         loop = asyncio.get_event_loop()
-        if loop.is_running() and hasattr(self.profiles_page, 'launcher'):
-            try:
-                future = asyncio.ensure_future(self.profiles_page.launcher.cleanup())
-                loop.run_until_complete(asyncio.wait_for(future, timeout=5.0))
-            except (asyncio.TimeoutError, RuntimeError):
-                pass
-
-        # Stop event loop
         if loop.is_running():
-            loop.stop()
+            # Best-effort: don't block close for too long.
+            self._spawn_task(self.launcher.cleanup(), context="launcher.cleanup")
 
         event.accept()
 
@@ -904,9 +1053,15 @@ def main():
     """Main entry point."""
     # Install secure logging filter to prevent credential leaks
     install_secure_logging()
-    
+
+    from antidetect_playwright.config import load_config
+
+    config_dir = os.environ.get("APP_CONFIG_DIR") or ".config"
+    config = load_config(config_dir)
+
     app = QApplication(sys.argv)
     app.setStyle("Fusion")
+    app.setProperty("inline_alert_ttl_ms", config.gui.inline_alert_ttl_ms)
 
     # Setup async event loop with qasync
     loop = qasync.QEventLoop(app)

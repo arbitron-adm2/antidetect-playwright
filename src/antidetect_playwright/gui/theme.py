@@ -278,6 +278,13 @@ class Theme:
         s = cls.spacing
         r = cls.radius
 
+        down_arrow_svg = (
+            "data:image/svg+xml;utf8,"
+            "<svg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24'>"
+            f"<path fill='{c.text_secondary.replace('#', '%23')}' d='M7 10l5 5 5-5z'/>"
+            "</svg>"
+        )
+
         return f"""
         /* === BASE STYLES === */
         QMainWindow {{
@@ -362,7 +369,19 @@ class Theme:
             max-width: 24px;
             min-height: 24px;
             max-height: 24px;
-            border: none;
+            border: 1px solid {c.border};
+            background-color: {c.bg_secondary};
+            border-radius: 4px;
+        }}
+
+        QPushButton[class="icon"]:hover {{
+            background-color: {c.bg_hover};
+            border-color: {c.border_light};
+        }}
+
+        QPushButton[class="icon"]:pressed {{
+            background-color: {c.accent};
+            border-color: {c.accent};
         }}
 
         /* === INPUTS === */
@@ -379,6 +398,10 @@ class Theme:
 
         QLineEdit:focus {{
             border-color: {c.accent};
+        }}
+
+        QLineEdit[error="true"] {{
+            border-color: {c.error};
         }}
 
         QLineEdit:disabled {{
@@ -399,6 +422,10 @@ class Theme:
 
         QTextEdit:focus {{
             border-color: {c.accent};
+        }}
+
+        QTextEdit[error="true"] {{
+            border-color: {c.error};
         }}
 
         /* === COMBOBOX === */
@@ -422,8 +449,21 @@ class Theme:
         }}
 
         QComboBox::drop-down {{
-            border: none;
-            width: 24px;
+            subcontrol-origin: padding;
+            subcontrol-position: top right;
+            width: 28px;
+            border-left: 1px solid {c.border};
+            background: {c.bg_secondary};
+        }}
+
+        QComboBox::drop-down:hover {{
+            background: {c.bg_hover};
+        }}
+
+        QComboBox::down-arrow {{
+            image: url("{down_arrow_svg}");
+            width: 12px;
+            height: 12px;
         }}
 
         QComboBox QAbstractItemView {{
@@ -432,6 +472,22 @@ class Theme:
             border-radius: 0;
             selection-background-color: {c.accent};
             font-family: {t.font_family};
+        }}
+
+        /* === INLINE ALERT === */
+        QFrame#inlineAlert {{
+            background-color: {c.bg_secondary};
+            border: 1px solid {c.error};
+            border-radius: {r.sm}px;
+        }}
+
+        QLabel#inlineAlertTitle {{
+            color: {c.error};
+            font-weight: 700;
+        }}
+
+        QLabel#inlineAlertMessage {{
+            color: {c.error};
         }}
 
         /* === SPINBOX === */

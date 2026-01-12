@@ -15,13 +15,20 @@ from PyQt6.QtWidgets import (
     QTabWidget,
     QMessageBox,
     QInputDialog,
+    QMenu,
 )
 from PyQt6.QtCore import Qt, pyqtSignal, QSize, QEvent, QTimer
 
 from ..theme import Theme, COLORS, TYPOGRAPHY, SPACING
 from ..icons import get_icon
 from ..models import ProfileStatus
-from ..components import FloatingToolbar, CheckboxWidget, HeaderCheckbox
+from ..components import (
+    FloatingToolbar,
+    CheckboxWidget,
+    HeaderCheckbox,
+    InlineAlert,
+    make_combobox_searchable,
+)
 from ..dialogs import StatusEditDialog
 
 
@@ -33,7 +40,9 @@ class TagsPage(QWidget):
     tag_renamed = pyqtSignal(str, str)
     status_created = pyqtSignal(str, str)
     status_renamed = pyqtSignal(str, str, str)  # old_name, new_name, color
+    status_deleted = pyqtSignal(str)
     note_template_created = pyqtSignal(str, str)
+    note_template_deleted = pyqtSignal(str)
 
     # Batch signals
     batch_delete_tags = pyqtSignal(list)  # list of tag names
@@ -79,6 +88,9 @@ class TagsPage(QWidget):
         desc.setProperty("class", "secondary")
         layout.addWidget(desc)
 
+        self._alert = InlineAlert(self)
+        layout.addWidget(self._alert)
+
         # Tab widget for Tags / Statuses / Notes
         self.tabs = QTabWidget()
 
@@ -109,6 +121,7 @@ class TagsPage(QWidget):
         self.tag_input = QLineEdit()
         self.tag_input.setPlaceholderText("Tag name")
         self.tag_input.returnPressed.connect(self._add_tag)
+        self.tag_input.textChanged.connect(lambda _t: self._clear_error(self.tag_input))
         add_layout.addWidget(self.tag_input)
 
         add_btn = QPushButton(" Add Tag")
@@ -181,6 +194,10 @@ class TagsPage(QWidget):
             lambda visible: self._position_tags_toolbar() if visible else None
         )
 
+        # Context menu
+        self.tags_table.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+        self.tags_table.customContextMenuRequested.connect(self._on_tags_context_menu)
+
         # Store reference for positioning
         self._tags_table_area = table_area
         table_area.installEventFilter(self)
@@ -206,6 +223,7 @@ class TagsPage(QWidget):
         self.status_color_combo = QComboBox()
         self.status_color_combo.addItems(["Green", "Yellow", "Red", "Blue", "Gray"])
         self.status_color_combo.setFixedWidth(100)
+        make_combobox_searchable(self.status_color_combo, "Search color")
         add_layout.addWidget(self.status_color_combo)
 
         add_btn = QPushButton(" Add Status")
@@ -249,6 +267,12 @@ class TagsPage(QWidget):
             self._on_statuses_header_clicked
         )
         self._statuses_header_checked = False
+
+        # Context menu
+        self.statuses_table.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+        self.statuses_table.customContextMenuRequested.connect(
+            self._on_statuses_context_menu
+        )
 
         # Wrap in container with rounded corners
         table_container = Theme.create_table_container(self.statuses_table)
@@ -397,6 +421,14 @@ class TagsPage(QWidget):
             lambda visible: self._position_templates_toolbar() if visible else None
         )
 
+        # Context menu
+        self.templates_table.setContextMenuPolicy(
+            Qt.ContextMenuPolicy.CustomContextMenu
+        )
+        self.templates_table.customContextMenuRequested.connect(
+            self._on_templates_context_menu
+        )
+
         # Store reference for positioning
         self._templates_table_area = table_area
         table_area.installEventFilter(self)
@@ -445,12 +477,29 @@ class TagsPage(QWidget):
     def _create_tag_actions(self, row: int, tag: str) -> QWidget:
         """Create actions widget for tag row."""
         widget = QWidget()
+        widget.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+        widget.customContextMenuRequested.connect(
+            lambda _pos, t=tag, w=widget: self._show_tag_context_menu(
+                t, w.mapToGlobal(w.rect().bottomLeft())
+            )
+        )
         layout = QHBoxLayout(widget)
         layout.setContentsMargins(4, 0, 4, 0)
         layout.setSpacing(4)
         layout.setAlignment(Qt.AlignmentFlag.AlignVCenter)
 
         btn_size = Theme.BTN_ICON_SIZE
+
+        menu_btn = QPushButton("⋯")
+        menu_btn.setFixedSize(btn_size, btn_size)
+        menu_btn.setProperty("class", "icon")
+        menu_btn.setToolTip("Menu")
+        menu_btn.clicked.connect(
+            lambda checked=False, t=tag, w=menu_btn: self._show_tag_context_menu(
+                t, w.mapToGlobal(w.rect().bottomLeft())
+            )
+        )
+        layout.addWidget(menu_btn)
 
         # Rename
         rename_btn = QPushButton()
@@ -475,13 +524,29 @@ class TagsPage(QWidget):
         layout.addStretch()
         return widget
 
+    def _on_tags_context_menu(self, pos):
+        row = self.tags_table.rowAt(pos.y())
+        if row < 0 or row >= len(self.tags):
+            return
+        tag = self.tags[row]
+        self._show_tag_context_menu(tag, self.tags_table.mapToGlobal(pos))
+
+    def _show_tag_context_menu(self, tag: str, global_pos):
+        menu = QMenu(self)
+        rename_action = menu.addAction("Rename")
+        rename_action.triggered.connect(lambda: self._rename_tag(tag))
+        delete_action = menu.addAction("Delete")
+        delete_action.triggered.connect(lambda: self._delete_tag(tag))
+        menu.exec(global_pos)
+
     def _add_tag(self):
         """Add new tag."""
         name = self.tag_input.text().strip()
         if not name:
             return
         if name in self.tags:
-            QMessageBox.warning(self, "Duplicate", f"Tag '{name}' already exists.")
+            self._set_error(self.tag_input, True)
+            self._alert.show_error("Duplicate", f"Tag '{name}' already exists.")
             return
 
         self.tags.append(name)
@@ -496,14 +561,21 @@ class TagsPage(QWidget):
         )
         if ok and new_name and new_name != old_name:
             if new_name in self.tags:
-                QMessageBox.warning(
-                    self, "Duplicate", f"Tag '{new_name}' already exists."
-                )
+                self._alert.show_error("Duplicate", f"Tag '{new_name}' already exists.")
                 return
             idx = self.tags.index(old_name)
             self.tags[idx] = new_name
             self.update_tags(self.tags)
             self.tag_renamed.emit(old_name, new_name)
+
+    def _set_error(self, widget: QWidget, is_error: bool) -> None:
+        widget.setProperty("error", "true" if is_error else "false")
+        widget.style().unpolish(widget)
+        widget.style().polish(widget)
+
+    def _clear_error(self, widget: QWidget) -> None:
+        self._set_error(widget, False)
+        self._alert.hide()
 
     def _delete_tag(self, tag: str):
         """Delete tag."""
@@ -578,12 +650,29 @@ class TagsPage(QWidget):
     def _create_status_actions(self, idx: int) -> QWidget:
         """Create actions for custom status."""
         widget = QWidget()
+        widget.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+        widget.customContextMenuRequested.connect(
+            lambda _pos, i=idx, w=widget: self._show_status_context_menu(
+                i, w.mapToGlobal(w.rect().bottomLeft())
+            )
+        )
         layout = QHBoxLayout(widget)
         layout.setContentsMargins(4, 0, 4, 0)
         layout.setSpacing(4)
         layout.setAlignment(Qt.AlignmentFlag.AlignVCenter)
 
         btn_size = Theme.BTN_ICON_SIZE
+
+        menu_btn = QPushButton("⋯")
+        menu_btn.setFixedSize(btn_size, btn_size)
+        menu_btn.setProperty("class", "icon")
+        menu_btn.setToolTip("Menu")
+        menu_btn.clicked.connect(
+            lambda checked=False, i=idx, w=menu_btn: self._show_status_context_menu(
+                i, w.mapToGlobal(w.rect().bottomLeft())
+            )
+        )
+        layout.addWidget(menu_btn)
 
         edit_btn = QPushButton()
         edit_btn.setIcon(get_icon("edit", 14))
@@ -606,6 +695,23 @@ class TagsPage(QWidget):
         layout.addStretch()
         return widget
 
+    def _on_statuses_context_menu(self, pos):
+        row = self.statuses_table.rowAt(pos.y())
+        if row < 3:
+            return
+        idx = row - 3
+        if idx < 0 or idx >= len(self.statuses):
+            return
+        self._show_status_context_menu(idx, self.statuses_table.mapToGlobal(pos))
+
+    def _show_status_context_menu(self, idx: int, global_pos):
+        menu = QMenu(self)
+        edit_action = menu.addAction("Edit")
+        edit_action.triggered.connect(lambda: self._edit_status(idx))
+        delete_action = menu.addAction("Delete")
+        delete_action.triggered.connect(lambda: self._delete_status(idx))
+        menu.exec(global_pos)
+
     def _edit_status(self, idx: int):
         """Edit custom status."""
         if 0 <= idx < len(self.statuses):
@@ -622,8 +728,11 @@ class TagsPage(QWidget):
     def _delete_status(self, idx: int):
         """Delete custom status."""
         if 0 <= idx < len(self.statuses):
+            name, _ = self.statuses[idx]
             del self.statuses[idx]
             self._refresh_statuses_table()
+            if name:
+                self.status_deleted.emit(name)
 
     def _add_note_template(self):
         """Add note template."""
@@ -666,12 +775,29 @@ class TagsPage(QWidget):
     def _create_template_actions(self, idx: int) -> QWidget:
         """Create actions for template."""
         widget = QWidget()
+        widget.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+        widget.customContextMenuRequested.connect(
+            lambda _pos, i=idx, w=widget: self._show_template_context_menu(
+                i, w.mapToGlobal(w.rect().bottomLeft())
+            )
+        )
         layout = QHBoxLayout(widget)
         layout.setContentsMargins(4, 0, 4, 0)
         layout.setSpacing(4)
         layout.setAlignment(Qt.AlignmentFlag.AlignVCenter)
 
         btn_size = Theme.BTN_ICON_SIZE
+
+        menu_btn = QPushButton("⋯")
+        menu_btn.setFixedSize(btn_size, btn_size)
+        menu_btn.setProperty("class", "icon")
+        menu_btn.setToolTip("Menu")
+        menu_btn.clicked.connect(
+            lambda checked=False, i=idx, w=menu_btn: self._show_template_context_menu(
+                i, w.mapToGlobal(w.rect().bottomLeft())
+            )
+        )
+        layout.addWidget(menu_btn)
 
         # Edit
         edit_btn = QPushButton()
@@ -696,6 +822,20 @@ class TagsPage(QWidget):
         layout.addStretch()
         return widget
 
+    def _on_templates_context_menu(self, pos):
+        row = self.templates_table.rowAt(pos.y())
+        if row < 0 or row >= len(self.note_templates):
+            return
+        self._show_template_context_menu(row, self.templates_table.mapToGlobal(pos))
+
+    def _show_template_context_menu(self, idx: int, global_pos):
+        menu = QMenu(self)
+        edit_action = menu.addAction("Edit")
+        edit_action.triggered.connect(lambda: self._edit_template(idx))
+        delete_action = menu.addAction("Delete")
+        delete_action.triggered.connect(lambda: self._delete_template(idx))
+        menu.exec(global_pos)
+
     def _edit_template(self, idx: int):
         """Edit template."""
         if 0 <= idx < len(self.note_templates):
@@ -704,12 +844,17 @@ class TagsPage(QWidget):
             self.template_content_input.setText(content)
             del self.note_templates[idx]
             self._refresh_templates_table()
+            if name:
+                self.note_template_deleted.emit(name)
 
     def _delete_template(self, idx: int):
         """Delete template."""
         if 0 <= idx < len(self.note_templates):
+            name, _ = self.note_templates[idx]
             del self.note_templates[idx]
             self._refresh_templates_table()
+            if name:
+                self.note_template_deleted.emit(name)
 
     def get_note_templates(self) -> list[tuple[str, str]]:
         """Get note templates list."""
@@ -720,6 +865,14 @@ class TagsPage(QWidget):
     def _add_checkbox_to_tags_table(self, row: int) -> None:
         """Add checkbox widget to tags table row."""
         checkbox = CheckboxWidget()
+        checkbox.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+        checkbox.customContextMenuRequested.connect(
+            lambda pos, r=row, w=checkbox: (
+                self._show_tag_context_menu(self.tags[r], w.mapToGlobal(pos))
+                if r < len(self.tags)
+                else None
+            )
+        )
         checkbox.toggled.connect(
             lambda checked, r=row: self._on_tag_checkbox_toggled(r, checked)
         )
@@ -754,7 +907,7 @@ class TagsPage(QWidget):
         self._toggle_all_tags(False)
 
     def _toggle_all_tags(self, checked: bool) -> None:
-        """Toggle all tag checkboxes."""
+        """Toggle all tag checkboxes and sync header."""
         for row in range(self.tags_table.rowCount()):
             widget = self.tags_table.cellWidget(row, 0)
             if isinstance(widget, CheckboxWidget):
@@ -765,6 +918,14 @@ class TagsPage(QWidget):
             self._selected_tags = list(range(self.tags_table.rowCount()))
         else:
             self._selected_tags.clear()
+        
+        # Sync header checkbox state
+        self._tags_header_checked = checked
+        if hasattr(self, "_tags_header_checkbox") and self._tags_header_checkbox:
+            self._tags_header_checkbox.blockSignals(True)
+            self._tags_header_checkbox.setChecked(checked)
+            self._tags_header_checkbox.blockSignals(False)
+        
         self.tags_toolbar.update_count(len(self._selected_tags))
 
     def _on_tags_header_clicked(self, section: int) -> None:
@@ -787,13 +948,19 @@ class TagsPage(QWidget):
         ]
         if tag_names:
             self.batch_delete_tags.emit(tag_names)
-            # Deselect all after delete
-            self._toggle_all_tags(False)
 
     def _add_checkbox_to_statuses_table(self, row: int, enabled: bool = True) -> None:
         """Add checkbox widget to statuses table row."""
         checkbox = CheckboxWidget()
         checkbox.setEnabled(enabled)
+        checkbox.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+        checkbox.customContextMenuRequested.connect(
+            lambda pos, r=row, w=checkbox: (
+                self._show_status_context_menu(r - 3, w.mapToGlobal(pos))
+                if r >= 3
+                else None
+            )
+        )
         checkbox.toggled.connect(
             lambda checked, r=row: self._on_status_checkbox_toggled(r, checked)
         )
@@ -837,7 +1004,7 @@ class TagsPage(QWidget):
         self._toggle_all_statuses(False)
 
     def _toggle_all_statuses(self, checked: bool) -> None:
-        """Toggle all status checkboxes (only enabled ones)."""
+        """Toggle all status checkboxes (only enabled ones) and sync header."""
         selected = []
         for row in range(self.statuses_table.rowCount()):
             widget = self.statuses_table.cellWidget(row, 0)
@@ -851,6 +1018,14 @@ class TagsPage(QWidget):
             self._selected_statuses = selected
         else:
             self._selected_statuses.clear()
+        
+        # Sync header checkbox state
+        self._statuses_header_checked = checked
+        if hasattr(self, "_statuses_header_checkbox") and self._statuses_header_checkbox:
+            self._statuses_header_checkbox.blockSignals(True)
+            self._statuses_header_checkbox.setChecked(checked)
+            self._statuses_header_checkbox.blockSignals(False)
+        
         self.statuses_toolbar.update_count(len(self._selected_statuses))
 
     def _on_statuses_header_clicked(self, section: int) -> None:
@@ -875,12 +1050,18 @@ class TagsPage(QWidget):
         ]
         if status_names:
             self.batch_delete_statuses.emit(status_names)
-            # Deselect all after delete
-            self._toggle_all_statuses(False)
 
     def _add_checkbox_to_templates_table(self, row: int) -> None:
         """Add checkbox widget to templates table row."""
         checkbox = CheckboxWidget()
+        checkbox.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+        checkbox.customContextMenuRequested.connect(
+            lambda pos, r=row, w=checkbox: (
+                self._show_template_context_menu(r, w.mapToGlobal(pos))
+                if r < len(self.note_templates)
+                else None
+            )
+        )
         checkbox.toggled.connect(
             lambda checked, r=row: self._on_template_checkbox_toggled(r, checked)
         )
@@ -918,7 +1099,7 @@ class TagsPage(QWidget):
         self._toggle_all_templates(False)
 
     def _toggle_all_templates(self, checked: bool) -> None:
-        """Toggle all template checkboxes."""
+        """Toggle all template checkboxes and sync header."""
         for row in range(self.templates_table.rowCount()):
             widget = self.templates_table.cellWidget(row, 0)
             if isinstance(widget, CheckboxWidget):
@@ -929,6 +1110,14 @@ class TagsPage(QWidget):
             self._selected_templates = list(range(self.templates_table.rowCount()))
         else:
             self._selected_templates.clear()
+        
+        # Sync header checkbox state
+        self._templates_header_checked = checked
+        if hasattr(self, "_templates_header_checkbox") and self._templates_header_checkbox:
+            self._templates_header_checkbox.blockSignals(True)
+            self._templates_header_checkbox.setChecked(checked)
+            self._templates_header_checkbox.blockSignals(False)
+        
         self.templates_toolbar.update_count(len(self._selected_templates))
 
     def _on_templates_header_clicked(self, section: int) -> None:
@@ -951,8 +1140,6 @@ class TagsPage(QWidget):
         ]
         if template_names:
             self.batch_delete_templates.emit(template_names)
-            # Deselect all after delete
-            self._toggle_all_templates(False)
 
     # === Toolbar positioning ===
 

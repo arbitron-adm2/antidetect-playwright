@@ -115,3 +115,6 @@ browser_state.json
 # Lock files
 **/lock
 *.lock
+
+# Camoufox browser directory
+camoufox/

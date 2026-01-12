@@ -10,6 +10,7 @@ from PyQt6.QtWidgets import (
     QTableWidgetItem,
     QStackedWidget,
     QMessageBox,
+    QMenu,
 )
 from PyQt6.QtCore import Qt, pyqtSignal, QSize, QEvent, QTimer
 
@@ -25,7 +26,6 @@ class TrashPage(QWidget):
     permanent_delete_requested = pyqtSignal(
         list
     )  # List of profile IDs to permanently delete
-    empty_trash_requested = pyqtSignal()
     selection_changed = pyqtSignal(int)
 
     def __init__(self, parent=None):
@@ -52,14 +52,6 @@ class TrashPage(QWidget):
         header_layout.addWidget(header)
 
         header_layout.addStretch()
-
-        # Empty trash button
-        empty_btn = QPushButton(" Empty Trash")
-        empty_btn.setIcon(get_icon("trash", 14))
-        empty_btn.setIconSize(QSize(14, 14))
-        empty_btn.setProperty("class", "danger")
-        empty_btn.clicked.connect(self._on_empty_trash)
-        header_layout.addWidget(empty_btn)
 
         layout.addLayout(header_layout)
 
@@ -143,13 +135,32 @@ class TrashPage(QWidget):
                 (0, "fixed", Theme.COL_CHECKBOX),  # Checkbox
                 (1, "stretch", None),  # Name - fills space
                 (2, "fixed", Theme.COL_DATE),  # Deleted At
-                (3, "fixed", Theme.COL_ACTIONS_SM),  # Actions (2 buttons)
+                (3, "fixed", Theme.COL_ACTIONS_MD),  # Actions (menu + 2 buttons)
             ],
         )
 
         table.horizontalHeader().sectionClicked.connect(self._on_header_section_clicked)
 
+        table.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+        table.customContextMenuRequested.connect(self._on_context_menu)
+
         return table
+
+    def _on_context_menu(self, pos):
+        row = self.table.rowAt(pos.y())
+        if row < 0:
+            return
+        self._show_row_context_menu(row, self.table.mapToGlobal(pos))
+
+    def _show_row_context_menu(self, row: int, global_pos):
+        if row < 0 or row >= len(self._deleted_profiles):
+            return
+        menu = QMenu(self)
+        restore_action = menu.addAction("Restore")
+        restore_action.triggered.connect(lambda: self._restore_profile(row))
+        delete_action = menu.addAction("Delete permanently")
+        delete_action.triggered.connect(lambda: self._permanent_delete(row))
+        menu.exec(global_pos)
 
     def update_deleted_profiles(self, profiles: list[dict]):
         """Update list of deleted profiles."""
@@ -192,6 +203,12 @@ class TrashPage(QWidget):
     def _add_checkbox_to_row(self, row: int):
         """Add checkbox to row."""
         checkbox = CheckboxWidget()
+        checkbox.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+        checkbox.customContextMenuRequested.connect(
+            lambda pos, r=row, w=checkbox: self._show_row_context_menu(
+                r, w.mapToGlobal(pos)
+            )
+        )
         checkbox.toggled.connect(
             lambda checked, r=row: self._on_row_checkbox_toggled(r, checked)
         )
@@ -200,12 +217,29 @@ class TrashPage(QWidget):
     def _create_actions_widget(self, row: int) -> QWidget:
         """Create actions widget for row."""
         widget = QWidget()
+        widget.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+        widget.customContextMenuRequested.connect(
+            lambda _pos, r=row, w=widget: self._show_row_context_menu(
+                r, w.mapToGlobal(w.rect().bottomLeft())
+            )
+        )
         layout = QHBoxLayout(widget)
         layout.setContentsMargins(4, 0, 4, 0)
         layout.setSpacing(4)
         layout.setAlignment(Qt.AlignmentFlag.AlignVCenter)
 
         btn_size = Theme.BTN_ICON_SIZE
+
+        menu_btn = QPushButton("⋯")
+        menu_btn.setFixedSize(btn_size, btn_size)
+        menu_btn.setProperty("class", "icon")
+        menu_btn.setToolTip("Menu")
+        menu_btn.clicked.connect(
+            lambda checked=False, r=row, w=menu_btn: self._show_row_context_menu(
+                r, w.mapToGlobal(w.rect().bottomLeft())
+            )
+        )
+        layout.addWidget(menu_btn)
 
         # Restore button
         restore_btn = QPushButton()
@@ -262,7 +296,9 @@ class TrashPage(QWidget):
             QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
         )
         if reply == QMessageBox.StandardButton.Yes:
-            self.empty_trash_requested.emit()
+            self.permanent_delete_requested.emit(
+                [p["id"] for p in self._deleted_profiles]
+            )
 
     # === Selection handling ===
 
@@ -276,7 +312,7 @@ class TrashPage(QWidget):
         self._toggle_all_checkboxes(checked)
 
     def _toggle_all_checkboxes(self, checked: bool):
-        """Toggle all checkboxes."""
+        """Toggle all checkboxes and sync header."""
         for row in range(self.table.rowCount()):
             widget = self.table.cellWidget(row, 0)
             if isinstance(widget, CheckboxWidget):
@@ -288,6 +324,14 @@ class TrashPage(QWidget):
             self._selected_rows = list(range(self.table.rowCount()))
         else:
             self._selected_rows.clear()
+        
+        # Sync header checkbox state
+        self._header_checked = checked
+        if self._header_checkbox:
+            self._header_checkbox.blockSignals(True)
+            self._header_checkbox.setChecked(checked)
+            self._header_checkbox.blockSignals(False)
+        
         self._update_selection()
 
     def _on_row_checkbox_toggled(self, row: int, checked: bool):

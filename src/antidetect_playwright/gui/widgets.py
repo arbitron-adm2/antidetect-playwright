@@ -23,7 +23,7 @@ from PyQt6.QtCore import Qt, pyqtSignal, QSize
 from PyQt6.QtGui import QFont, QAction
 
 from .models import BrowserProfile, ProfileStatus, Folder, ProxyConfig
-from .styles import COLORS, OS_ICONS, get_country_flag
+from .styles import COLORS, OS_ICONS
 from .icons import get_icon
 
 
@@ -102,34 +102,50 @@ class StatusBadge(QWidget):
         layout = QHBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(0)
-        layout.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
+        layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
 
         text = self.status.value.upper()
 
-        colors = {
-            ProfileStatus.RUNNING: COLORS["success"],
-            ProfileStatus.STOPPED: COLORS["text_muted"],
-            ProfileStatus.ERROR: COLORS["error"],
+        # Colors with subtle background
+        style_map = {
+            ProfileStatus.RUNNING: {
+                "bg": "rgba(34, 197, 94, 0.15)",
+                "border": COLORS["success"],
+                "text": COLORS["success"],
+            },
+            ProfileStatus.STOPPED: {
+                "bg": "rgba(128, 128, 128, 0.1)",
+                "border": COLORS["text_muted"],
+                "text": COLORS["text_muted"],
+            },
+            ProfileStatus.ERROR: {
+                "bg": "rgba(239, 68, 68, 0.15)",
+                "border": COLORS["error"],
+                "text": COLORS["error"],
+            },
         }
-        border_color = colors.get(self.status, COLORS["text_muted"])
+        style = style_map.get(
+            self.status,
+            {"bg": "transparent", "border": COLORS["text_muted"], "text": COLORS["text_muted"]},
+        )
 
         label = QLabel(text)
-        label.setMinimumHeight(20)
-        label.setMaximumHeight(20)
+        label.setMinimumHeight(22)
+        label.setMaximumHeight(22)
         label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         label.setStyleSheet(
             f"""
-            background-color: transparent;
-            color: white;
-            border: 1px solid {border_color};
+            background-color: {style['bg']};
+            color: {style['text']};
+            border: 1px solid {style['border']};
             border-radius: 4px;
-            padding: 0 8px;
-            font-size: 11px;
-            font-weight: 600;
+            padding: 0 10px;
+            font-size: 10px;
+            font-weight: 700;
+            letter-spacing: 0.5px;
         """
         )
         layout.addWidget(label)
-        layout.addStretch()
 
 
 class TagWidget(QWidget):
@@ -198,18 +214,7 @@ class TagsWidget(QWidget):
         edit_btn.setIcon(get_icon("edit", 14))
         edit_btn.setIconSize(QSize(14, 14))
         edit_btn.setFixedSize(24, 24)
-        edit_btn.setStyleSheet(
-            f"""
-            QPushButton {{
-                background: {COLORS['bg_tertiary']};
-                border: none;
-                border-radius: 4px;
-            }}
-            QPushButton:hover {{
-                background: {COLORS['border']};
-            }}
-        """
-        )
+        edit_btn.setProperty("class", "icon")
         edit_btn.setToolTip("Edit tags")
         edit_btn.clicked.connect(self.edit_requested.emit)
         edit_btn.setCursor(Qt.CursorShape.PointingHandCursor)
@@ -257,18 +262,7 @@ class NotesWidget(QWidget):
         edit_btn.setIcon(get_icon("edit", 14))
         edit_btn.setIconSize(QSize(14, 14))
         edit_btn.setFixedSize(24, 24)
-        edit_btn.setStyleSheet(
-            f"""
-            QPushButton {{
-                background: {COLORS['bg_tertiary']};
-                border: none;
-                border-radius: 4px;
-            }}
-            QPushButton:hover {{
-                background: {COLORS['border']};
-            }}
-        """
-        )
+        edit_btn.setProperty("class", "icon")
         edit_btn.setToolTip("Edit notes")
         edit_btn.clicked.connect(self.edit_requested.emit)
         edit_btn.setCursor(Qt.CursorShape.PointingHandCursor)
@@ -278,10 +272,7 @@ class NotesWidget(QWidget):
 
 
 class ProxyWidget(QWidget):
-    """Widget for displaying proxy with flag, ping and quick-change."""
-
-    ping_requested = pyqtSignal()
-    change_requested = pyqtSignal()
+    """Widget for displaying proxy."""
 
     def __init__(self, proxy: ProxyConfig, parent=None):
         super().__init__(parent)
@@ -295,10 +286,16 @@ class ProxyWidget(QWidget):
         layout.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
 
         # Country flag
-        flag = get_country_flag(self.proxy.country_code)
-        flag_label = QLabel(flag)
-        flag_label.setStyleSheet("font-size: 16px;")
-        layout.addWidget(flag_label)
+        if self.proxy:
+            icon_btn = QPushButton()
+            icon_btn.setEnabled(False)
+            icon_btn.setIcon(get_icon("proxy", 14))
+            icon_btn.setIconSize(QSize(14, 14))
+            icon_btn.setFixedSize(18, 18)
+            icon_btn.setStyleSheet(
+                "QPushButton { background: transparent; border: none; padding: 0px; }"
+            )
+            layout.addWidget(icon_btn)
 
         # IP/Host
         ip_text = self.proxy.display_string()
@@ -320,50 +317,6 @@ class ProxyWidget(QWidget):
             layout.addWidget(ping_label)
 
         layout.addStretch()
-
-        # Ping button with SVG icon
-        ping_btn = QPushButton()
-        ping_btn.setIcon(get_icon("ping", 14))
-        ping_btn.setIconSize(QSize(14, 14))
-        ping_btn.setFixedSize(28, 24)
-        ping_btn.setStyleSheet(
-            f"""
-            QPushButton {{
-                background: {COLORS['bg_tertiary']};
-                border: none;
-                border-radius: 4px;
-            }}
-            QPushButton:hover {{
-                background: {COLORS['border']};
-            }}
-        """
-        )
-        ping_btn.setToolTip("Ping proxy")
-        ping_btn.clicked.connect(self.ping_requested.emit)
-        ping_btn.setCursor(Qt.CursorShape.PointingHandCursor)
-        layout.addWidget(ping_btn)
-
-        # Quick change button with SVG icon
-        change_btn = QPushButton()
-        change_btn.setIcon(get_icon("swap", 14))
-        change_btn.setIconSize(QSize(14, 14))
-        change_btn.setFixedSize(28, 24)
-        change_btn.setStyleSheet(
-            f"""
-            QPushButton {{
-                background: {COLORS['bg_tertiary']};
-                border: none;
-                border-radius: 4px;
-            }}
-            QPushButton:hover {{
-                background: {COLORS['border']};
-            }}
-        """
-        )
-        change_btn.setToolTip("Quick change proxy from pool")
-        change_btn.clicked.connect(self.change_requested.emit)
-        change_btn.setCursor(Qt.CursorShape.PointingHandCursor)
-        layout.addWidget(change_btn)
 
 
 class ProfileNameWidget(QWidget):
@@ -413,48 +366,59 @@ class ProfileNameWidget(QWidget):
 
         layout.addStretch()
 
-        # Start/Stop button with text and icon
+        # Start/Stop button with icon
+        btn = QPushButton()
+        btn.setFixedSize(72, 24)
+
         if self.profile.status == ProfileStatus.RUNNING:
-            btn = QPushButton("⏸ STOP")
-            border_color = COLORS["error"]
+            btn.setIcon(get_icon("stop", 14))
+            btn.setIconSize(QSize(14, 14))
+            btn.setText("STOP")
             btn.setStyleSheet(
                 f"""
                 QPushButton {{
-                    background-color: transparent;
-                    color: white;
-                    border: 1px solid {border_color};
+                    background-color: rgba(239, 68, 68, 0.1);
+                    color: {COLORS['error']};
+                    border: 1px solid {COLORS['error']};
                     border-radius: 4px;
-                    padding: 0 8px;
-                    font-size: 11px;
-                    font-weight: 600;
-                    min-height: 20px;
-                    max-height: 20px;
+                    padding: 0 10px 0 6px;
+                    font-size: 10px;
+                    font-weight: 700;
+                    letter-spacing: 0.5px;
                 }}
                 QPushButton:hover {{
-                    background-color: rgba(239, 68, 68, 0.1);
+                    background-color: rgba(239, 68, 68, 0.25);
+                }}
+                QPushButton:pressed {{
+                    background-color: {COLORS['error']};
+                    color: white;
                 }}
             """
             )
             btn.setToolTip("Stop browser")
             btn.clicked.connect(self.stop_requested.emit)
         else:
-            btn = QPushButton("▶ START")
-            border_color = COLORS["success"]
+            btn.setIcon(get_icon("play", 14))
+            btn.setIconSize(QSize(14, 14))
+            btn.setText("START")
             btn.setStyleSheet(
                 f"""
                 QPushButton {{
-                    background-color: transparent;
-                    color: white;
-                    border: 1px solid {border_color};
+                    background-color: rgba(34, 197, 94, 0.1);
+                    color: {COLORS['success']};
+                    border: 1px solid {COLORS['success']};
                     border-radius: 4px;
-                    padding: 0 8px;
-                    font-size: 11px;
-                    font-weight: 600;
-                    min-height: 20px;
-                    max-height: 20px;
+                    padding: 0 10px 0 6px;
+                    font-size: 10px;
+                    font-weight: 700;
+                    letter-spacing: 0.5px;
                 }}
                 QPushButton:hover {{
-                    background-color: rgba(34, 197, 94, 0.1);
+                    background-color: rgba(34, 197, 94, 0.25);
+                }}
+                QPushButton:pressed {{
+                    background-color: {COLORS['success']};
+                    color: white;
                 }}
             """
             )
@@ -574,19 +538,10 @@ class AllProfilesItem(QFrame):
         )
 
         layout = QHBoxLayout(self)
-        layout.setContentsMargins(10, 8, 10, 8)
+        layout.setContentsMargins(12, 8, 12, 8)
         layout.setSpacing(8)
-        layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
 
-        # Icon
-        icon_label = QLabel("≡")
-        icon_label.setStyleSheet(
-            f"font-size: 14px; background: transparent; border: none; color: {COLORS['text_primary']};"
-        )
-        icon_label.setFixedWidth(16)
-        layout.addWidget(icon_label)
-
-        # Name - не обрезается
+        # Name - выровнено влево как FOLDERS
         name_label = QLabel("All Profiles")
         name_label.setStyleSheet(
             f"color: {COLORS['text_primary']}; font-size: 12px; font-weight: 500; background: transparent; border: none;"

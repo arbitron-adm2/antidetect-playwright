@@ -22,6 +22,8 @@ class CheckboxWidget(QWidget):
     def __init__(self, parent=None):
         super().__init__(parent)
 
+        accent = COLORS.accent.replace("#", "%23")
+
         # Remove all padding for checkbox column
         self.setContentsMargins(0, 0, 0, 0)
 
@@ -48,9 +50,8 @@ class CheckboxWidget(QWidget):
                 background: {COLORS.bg_hover};
             }}
             QCheckBox::indicator:checked {{
-                background-color: {COLORS.accent};
                 border-color: {COLORS.accent};
-                image: url(data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSIxMiIgaGVpZ2h0PSIxMiIgdmlld0JveD0iMCAwIDI0IDI0IiBmaWxsPSJub25lIiBzdHJva2U9IndoaXRlIiBzdHJva2Utd2lkdGg9IjMiIHN0cm9rZS1saW5lY2FwPSJyb3VuZCIgc3Ryb2tlLWxpbmVqb2luPSJyb3VuZCI+PHBvbHlsaW5lIHBvaW50cz0iMjAgNiA5IDE3IDQgMTIiPjwvcG9seWxpbmU+PC9zdmc+);
+                background: {COLORS.accent};
             }}
         """
         )
@@ -72,6 +73,7 @@ class HeaderCheckbox(QWidget):
 
     def __init__(self, parent=None):
         super().__init__(parent)
+        accent = COLORS.accent.replace("#", "%23")
         # Match table header background
         self.setAutoFillBackground(True)
         self.setStyleSheet(f"background: {COLORS.bg_tertiary};")
@@ -97,9 +99,8 @@ class HeaderCheckbox(QWidget):
                 background: {COLORS.bg_hover};
             }}
             QCheckBox::indicator:checked {{
-                background-color: {COLORS.accent};
                 border-color: {COLORS.accent};
-                image: url(data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSIxMiIgaGVpZ2h0PSIxMiIgdmlld0JveD0iMCAwIDI0IDI0IiBmaWxsPSJub25lIiBzdHJva2U9IndoaXRlIiBzdHJva2Utd2lkdGg9IjMiIHN0cm9rZS1saW5lY2FwPSJyb3VuZCIgc3Ryb2tlLWxpbmVqb2luPSJyb3VuZCI+PHBvbHlsaW5lIHBvaW50cz0iMjAgNiA5IDE3IDQgMTIiPjwvcG9seWxpbmU+PC9zdmc+);
+                background: {COLORS.accent};
             }}
             QCheckBox::indicator:indeterminate {{
                 background-color: {COLORS.accent};
@@ -131,8 +132,13 @@ class SelectableTable(QTableWidget):
 
     def __init__(self, parent=None):
         super().__init__(parent)
-        self._header_checkbox = None
+        self._header_checkbox: HeaderCheckbox | None = None
         self._updating_selection = False
+
+    def set_header_checkbox(self, checkbox: HeaderCheckbox):
+        """Set external header checkbox for synchronization."""
+        self._header_checkbox = checkbox
+        self._header_checkbox.toggled.connect(self._on_header_toggled)
 
     def setup_with_columns(self, columns: list[str]):
         """Setup table with checkbox + given columns.
@@ -180,6 +186,7 @@ class SelectableTable(QTableWidget):
             if isinstance(widget, CheckboxWidget):
                 widget.setChecked(True)
         self._updating_selection = False
+        self._sync_header_checkbox()
         self._emit_selection_changed()
 
     def deselect_all(self):
@@ -190,10 +197,27 @@ class SelectableTable(QTableWidget):
             if isinstance(widget, CheckboxWidget):
                 widget.setChecked(False)
         self._updating_selection = False
+        self._sync_header_checkbox()
+        self._emit_selection_changed()
+
+    def reset_selection(self):
+        """Reset all selection state including header checkbox.
+        
+        Use this after destructive operations like delete.
+        """
+        self._updating_selection = True
+        for row in range(self.rowCount()):
+            widget = self.cellWidget(row, 0)
+            if isinstance(widget, CheckboxWidget):
+                widget.setChecked(False)
+        self._updating_selection = False
+        self._force_header_unchecked()
         self._emit_selection_changed()
 
     def _on_header_toggled(self, checked: bool):
         """Handle header checkbox toggle."""
+        if self._updating_selection:
+            return
         if checked:
             self.select_all()
         else:
@@ -202,7 +226,43 @@ class SelectableTable(QTableWidget):
     def _on_row_toggled(self, row: int, checked: bool):
         """Handle row checkbox toggle."""
         if not self._updating_selection:
+            self._sync_header_checkbox()
             self._emit_selection_changed()
+
+    def _sync_header_checkbox(self):
+        """Synchronize header checkbox state with row selections."""
+        if not self._header_checkbox:
+            return
+
+        total_rows = self.rowCount()
+        if total_rows == 0:
+            self._force_header_unchecked()
+            return
+
+        selected_count = len(self.get_selected_rows())
+
+        # Block signals to avoid recursion
+        self._header_checkbox.checkbox.blockSignals(True)
+
+        if selected_count == 0:
+            self._header_checkbox.checkbox.setCheckState(Qt.CheckState.Unchecked)
+        elif selected_count == total_rows:
+            self._header_checkbox.checkbox.setCheckState(Qt.CheckState.Checked)
+        else:
+            # Partial selection - use indeterminate or unchecked
+            self._header_checkbox.checkbox.setTristate(True)
+            self._header_checkbox.checkbox.setCheckState(Qt.CheckState.PartiallyChecked)
+
+        self._header_checkbox.checkbox.blockSignals(False)
+
+    def _force_header_unchecked(self):
+        """Force header checkbox to unchecked state."""
+        if not self._header_checkbox:
+            return
+        self._header_checkbox.checkbox.blockSignals(True)
+        self._header_checkbox.checkbox.setTristate(False)
+        self._header_checkbox.checkbox.setCheckState(Qt.CheckState.Unchecked)
+        self._header_checkbox.checkbox.blockSignals(False)
 
     def _emit_selection_changed(self):
         """Emit selection changed signal."""

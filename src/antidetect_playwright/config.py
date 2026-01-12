@@ -119,6 +119,7 @@ class GuiConfig:
     min_height: int
     sidebar_width: int
     items_per_page: int
+    inline_alert_ttl_ms: int
     theme: str
     enable_chrome_theme: bool
     data_dir: str
@@ -328,6 +329,7 @@ def load_config(config_dir: str | Path) -> AppConfig:
             min_height=app_data["gui"]["min_height"],
             sidebar_width=app_data["gui"]["sidebar_width"],
             items_per_page=app_data["gui"]["items_per_page"],
+            inline_alert_ttl_ms=app_data["gui"]["inline_alert_ttl_ms"],
             theme=app_data["gui"]["theme"],
             enable_chrome_theme=app_data["gui"]["enable_chrome_theme"],
             data_dir=app_data["gui"]["data_dir"],
