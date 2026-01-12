@@ -272,12 +272,19 @@ class NotesWidget(QWidget):
 
 
 class ProxyWidget(QWidget):
-    """Widget for displaying proxy."""
+    """Widget for displaying proxy with country flag."""
 
     def __init__(self, proxy: ProxyConfig, parent=None):
         super().__init__(parent)
         self.proxy = proxy
         self._setup_ui()
+
+    def _get_flag_emoji(self, country_code: str) -> str:
+        """Convert country code to flag emoji."""
+        if not country_code or len(country_code) != 2:
+            return "🌐"
+        # Convert country code to regional indicator symbols
+        return "".join(chr(127397 + ord(c)) for c in country_code.upper())
 
     def _setup_ui(self):
         layout = QHBoxLayout(self)
@@ -285,8 +292,14 @@ class ProxyWidget(QWidget):
         layout.setSpacing(8)
         layout.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
 
-        # Country flag
-        if self.proxy:
+        # Country flag emoji
+        if self.proxy and self.proxy.country_code:
+            flag = self._get_flag_emoji(self.proxy.country_code)
+            flag_label = QLabel(flag)
+            flag_label.setStyleSheet("font-size: 16px;")
+            layout.addWidget(flag_label)
+        else:
+            # Proxy icon when no country code
             icon_btn = QPushButton()
             icon_btn.setEnabled(False)
             icon_btn.setIcon(get_icon("proxy", 14))
@@ -298,13 +311,13 @@ class ProxyWidget(QWidget):
             layout.addWidget(icon_btn)
 
         # IP/Host
-        ip_text = self.proxy.display_string()
+        ip_text = self.proxy.display_string() if self.proxy else "Direct"
         ip_label = QLabel(ip_text)
         ip_label.setStyleSheet(f"color: {COLORS['text_primary']}; font-size: 12px;")
         layout.addWidget(ip_label)
 
         # Ping indicator
-        if self.proxy.ping_ms > 0:
+        if self.proxy and self.proxy.ping_ms > 0:
             ping_color = (
                 COLORS["success"]
                 if self.proxy.ping_ms < 200

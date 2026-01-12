@@ -12,7 +12,7 @@ from camoufox.async_api import AsyncCamoufox
 from camoufox.utils import launch_options as camoufox_launch_options
 import orjson
 
-from .models import BrowserProfile, ProfileStatus
+from .models import BrowserProfile, ProfileStatus, ProxyConfig
 
 logger = logging.getLogger(__name__)
 
@@ -148,6 +148,20 @@ class BrowserLauncher:
 
             proxy = profile.proxy.to_camoufox()
 
+            # If no proxy, detect current IP and set GeoIP for timezone/locale
+            geoip_info = None
+            if not proxy:
+                from .geoip import get_current_ip_info
+                geoip_info = await get_current_ip_info()
+                if geoip_info:
+                    logger.info(f"Detected IP: {geoip_info.ip} ({geoip_info.country_code}, {geoip_info.timezone})")
+                    # Update profile with current IP info for display
+                    if not profile.proxy:
+                        profile.proxy = ProxyConfig()
+                    profile.proxy.country_code = geoip_info.country_code
+                    profile.proxy.timezone = geoip_info.timezone
+                    profile.proxy.city = geoip_info.city
+
             logger.info("Starting profile: %s", profile.name)
             logger.debug("Proxy configured: host=%s, port=%s", 
                         profile.proxy.host if profile.proxy else None,
@@ -157,7 +171,7 @@ class BrowserLauncher:
             # Camoufox options - maximum protection + user settings
             camoufox_options = {
                 "headless": False,
-                # GeoIP auto-detects timezone/locale from proxy IP
+                # GeoIP auto-detects timezone/locale from proxy IP or use detected timezone
                 "geoip": proxy is not None,
                 # Block WebRTC to prevent IP leak
                 "block_webrtc": True,
@@ -298,6 +312,11 @@ class BrowserLauncher:
                 fp_config["canvas:aaOffset"] = canvas_aa_offset
                 fp_config["fonts:spacing_seed"] = fonts_spacing_seed
                 fp_config["window.history.length"] = history_length
+
+                # If no proxy but GeoIP detected, set timezone from real IP
+                if not proxy and geoip_info:
+                    fp_config["locale:timezone"] = geoip_info.timezone
+                    logger.info(f"Set timezone from GeoIP: {geoip_info.timezone}")
 
                 # Remove screen/window dimension keys so Camoufox uses real sizes
                 for key in list(fp_config.keys()):
