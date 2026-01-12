@@ -22,6 +22,7 @@ class NavigatorPreset:
     app_code_name: str = "Mozilla"
     product: str = "Gecko"
     product_sub: str = "20030107"
+    build_id: str = "20100101"  # Firefox buildID (static for all versions)
     do_not_track: str | None = None
     webdriver: bool = False
 
@@ -40,6 +41,7 @@ class NavigatorPreset:
             "appCodeName": self.app_code_name,
             "product": self.product,
             "productSub": self.product_sub,
+            "buildID": self.build_id,
             "doNotTrack": self.do_not_track,
             "webdriver": self.webdriver,
         }

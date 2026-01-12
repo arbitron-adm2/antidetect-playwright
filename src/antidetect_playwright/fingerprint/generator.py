@@ -38,18 +38,14 @@ CHROME_VERSIONS = [
 ]
 
 FIREFOX_VERSIONS = [
-    "115.0",
-    "116.0",
-    "117.0",
-    "118.0",
-    "119.0",
-    "120.0",
-    "121.0",
-    "122.0",
-    "123.0",
-    "124.0",
-    "125.0",
-    "126.0",
+    "128.0",
+    "129.0",
+    "130.0",
+    "131.0",
+    "132.0",
+    "133.0",
+    "134.0",
+    "135.0",
 ]
 
 # Platform configurations
@@ -535,6 +531,7 @@ class FingerprintPresetGenerator:
             max_touch_points=max_touch_points,
             vendor=platform_config["vendor"],
             app_version=app_version,
+            build_id="20100101",  # Firefox buildID (always static)
             do_not_track=self._random_choice([None, "1", None, None]),  # Usually null
             webdriver=False,
         )
@@ -681,6 +678,7 @@ def generate_with_browserforge() -> AntidetectPreset | None:
             app_code_name=fp.navigator.appCodeName,
             product=fp.navigator.product,
             product_sub=fp.navigator.productSub,
+            build_id="20100101",  # Firefox buildID (always static)
             do_not_track=fp.navigator.doNotTrack,
             webdriver=False,
         )
@@ -767,6 +765,7 @@ def generate_with_fpgen() -> AntidetectPreset | None:
             app_code_name=fp.get("navigator.appCodeName", "Mozilla"),
             product=fp.get("navigator.product", "Gecko"),
             product_sub=fp.get("navigator.productSub", "20030107"),
+            build_id="20100101",  # Firefox buildID (always static)
             do_not_track=fp.get("navigator.doNotTrack"),
             webdriver=False,
         )
