@@ -315,7 +315,7 @@ class BrowserLauncher:
 
                 # If no proxy but GeoIP detected, set timezone from real IP
                 if not proxy and geoip_info:
-                    fp_config["locale:timezone"] = geoip_info.timezone
+                    fp_config["timezone"] = geoip_info.timezone
                     logger.info(f"Set timezone from GeoIP: {geoip_info.timezone}")
 
                 # Remove screen/window dimension keys so Camoufox uses real sizes

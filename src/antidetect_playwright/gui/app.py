@@ -140,7 +140,7 @@ class MainWindow(QMainWindow):
         try:
             return self.storage.get_profile(profile_id)
         except (ValueError, ProfileNotFoundError, StorageError) as e:
-            logging.getLogger(__name__).warning("Failed to get profile %s: %s", profile_id, e)
+            # Silently ignore - profile may have been deleted from trash
             return None
 
     def _spawn_task(self, coro, context: str) -> None:
