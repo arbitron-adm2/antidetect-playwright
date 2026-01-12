@@ -278,9 +278,9 @@ class ProfilesPage(QWidget):
     def _create_table(self) -> QTableWidget:
         """Create profiles table with checkbox column."""
         table = QTableWidget()
-        table.setColumnCount(6)  # Checkbox + 5 columns
+        table.setColumnCount(7)  # Checkbox + 6 columns
         table.setHorizontalHeaderLabels(
-            ["", "Name", "Status", "Notes", "Tags", "Proxy"]
+            ["", "Name", "Status", "Notes", "Tags", "Proxy", "Actions"]
         )
 
         # Unified table styling first
@@ -296,6 +296,7 @@ class ProfilesPage(QWidget):
                 (3, "stretch", None),  # Notes - fills space
                 (4, "stretch", None),  # Tags - fills space
                 (5, "stretch", None),  # Proxy - fills space
+                (6, "fixed", Theme.COL_ACTIONS_MD),  # Actions
             ],
         )
 
@@ -347,7 +348,10 @@ class ProfilesPage(QWidget):
 
     def _on_context_menu(self, pos):
         """Forward context menu request."""
-        item = self.table.itemAt(pos)
+        row = self.table.rowAt(pos.y())
+        if row < 0:
+            return
+        item = self.table.item(row, 1)
         if item:
             self.profile_context_menu.emit(item, self.table.mapToGlobal(pos))
 
@@ -397,12 +401,26 @@ class ProfilesPage(QWidget):
 
     # === Checkbox and selection methods ===
 
-    def add_checkbox_to_row(self, row: int):
+    def add_checkbox_to_row(self, row: int, checked: bool = False):
         """Add checkbox widget to row's first column."""
         checkbox = CheckboxWidget()
+        checkbox.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+        checkbox.customContextMenuRequested.connect(
+            lambda pos, r=row, w=checkbox: (
+                self.profile_context_menu.emit(
+                    self.table.item(r, 1), w.mapToGlobal(pos)
+                )
+                if self.table.item(r, 1)
+                else None
+            )
+        )
         checkbox.toggled.connect(
             lambda checked: self._on_row_checkbox_toggled(row, checked)
         )
+        if checked:
+            checkbox.blockSignals(True)
+            checkbox.setChecked(True)
+            checkbox.blockSignals(False)
         self.table.setCellWidget(row, 0, checkbox)
 
     def _on_header_section_clicked(self, section: int):
@@ -473,12 +491,21 @@ class ProfilesPage(QWidget):
         return ids
 
     def _deselect_all(self):
-        """Deselect all checkboxes."""
+        """Deselect all checkboxes and reset header checkbox."""
         for row in range(self.table.rowCount()):
             widget = self.table.cellWidget(row, 0)
             if isinstance(widget, CheckboxWidget):
+                widget.blockSignals(True)
                 widget.setChecked(False)
-        self._update_selection()
+                widget.blockSignals(False)
+        self._selected_rows.clear()
+        self._header_checked = False
+        if self._header_checkbox:
+            self._header_checkbox.blockSignals(True)
+            self._header_checkbox.setChecked(False)
+            self._header_checkbox.blockSignals(False)
+        self.floating_toolbar.update_count(0)
+        self.selection_changed.emit([])
 
     # === Batch operation handlers ===
 
@@ -505,8 +532,6 @@ class ProfilesPage(QWidget):
     def _on_batch_delete(self):
         """Handle batch delete."""
         self.batch_delete.emit(self.get_selected_profile_ids())
-        # Deselect all after delete
-        self._deselect_all()
 
     # === Header checkbox positioning ===
 

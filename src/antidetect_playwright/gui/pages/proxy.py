@@ -1,6 +1,7 @@
 """Proxy management page with full table view."""
 
 import asyncio
+import logging
 from PyQt6.QtWidgets import (
     QWidget,
     QVBoxLayout,
@@ -13,6 +14,7 @@ from PyQt6.QtWidgets import (
     QTextEdit,
     QLineEdit,
     QMessageBox,
+    QMenu,
 )
 from PyQt6.QtCore import Qt, pyqtSignal, QSize, QEvent, QTimer
 
@@ -20,8 +22,7 @@ from ..theme import Theme, COLORS, TYPOGRAPHY, SPACING
 from ..icons import get_icon
 from ..models import ProxyConfig
 from ..proxy_utils import parse_proxy_list, ping_proxy, detect_proxy_geo
-from ..components import FloatingToolbar, CheckboxWidget, HeaderCheckbox
-from ..styles import get_country_flag
+from ..components import FloatingToolbar, CheckboxWidget, HeaderCheckbox, InlineAlert
 
 
 class ProxyPage(QWidget):
@@ -65,6 +66,9 @@ class ProxyPage(QWidget):
         desc = QLabel("Manage proxy pool for quick rotation and auto-assignment.")
         desc.setProperty("class", "secondary")
         layout.addWidget(desc)
+
+        self._alert = InlineAlert(self)
+        layout.addWidget(self._alert)
 
         # Table area with overlay toolbar
         table_area = QWidget()
@@ -131,6 +135,7 @@ class ProxyPage(QWidget):
         add_layout.addWidget(self.proxy_input)
 
         add_btn_layout = QHBoxLayout()
+        self.proxy_input.textChanged.connect(lambda: self._clear_error(self.proxy_input))
         add_btn_layout.addStretch()
 
         add_btn = QPushButton(" Add Proxies")
@@ -166,29 +171,51 @@ class ProxyPage(QWidget):
                 (4, "fixed", 60),  # Auth
                 (5, "fixed", 80),  # Country
                 (6, "fixed", 80),  # Ping
-                (7, "fixed", Theme.COL_ACTIONS_MD),  # Actions (3 buttons)
+                (7, "fixed", Theme.COL_ACTIONS_LG),  # Actions (menu + 3 buttons)
             ],
         )
 
         # Click on header column 0 toggles select all
         table.horizontalHeader().sectionClicked.connect(self._on_header_section_clicked)
 
+        # Context menu (row-wide)
+        table.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+        table.customContextMenuRequested.connect(self._on_context_menu)
+
         return table
+
+    def _on_context_menu(self, pos):
+        row = self.table.rowAt(pos.y())
+        if row < 0:
+            return
+        self._show_row_context_menu(row, self.table.mapToGlobal(pos))
+
+    def _show_row_context_menu(self, row: int, global_pos):
+        if row < 0 or row >= len(self.proxies):
+            return
+        menu = QMenu(self)
+        edit_action = menu.addAction("Edit")
+        edit_action.triggered.connect(lambda: self._edit_proxy(row))
+        ping_action = menu.addAction("Ping")
+        ping_action.triggered.connect(lambda: self._ping_proxy_clicked(row))
+        delete_action = menu.addAction("Delete")
+        delete_action.triggered.connect(lambda: self._delete_proxy(row))
+        menu.exec(global_pos)
 
     def update_proxies(self, proxies: list[ProxyConfig]):
         """Update proxy list and refresh table."""
         self.proxies = list(proxies)
-        self._refresh_table()
+        self._refresh_table(preserve_selection=True)
 
-    def _refresh_table(self):
+    def _refresh_table(self, preserve_selection: bool = True):
         """Refresh proxy table."""
-        self._selected_rows.clear()
-        self.floating_toolbar.update_count(0)
+        previous_selected = set(self._selected_rows) if preserve_selection else set()
+        self._selected_rows = []
         self.table.setRowCount(len(self.proxies))
 
         for row, proxy in enumerate(self.proxies):
             # Checkbox
-            self.add_checkbox_to_row(row)
+            self.add_checkbox_to_row(row, checked=row in previous_selected)
 
             # Type
             type_item = QTableWidgetItem(proxy.proxy_type.value.upper())
@@ -210,13 +237,13 @@ class ProxyPage(QWidget):
             auth_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
             self.table.setItem(row, 4, auth_item)
 
-            # Country - with flag
+            # Country - SVG globe icon
             country_code = proxy.country_code.upper() if proxy.country_code else ""
-            flag = get_country_flag(country_code)
-            country_widget = QLabel(f"{flag} {country_code}" if country_code else flag)
-            country_widget.setAlignment(Qt.AlignmentFlag.AlignCenter)
-            country_widget.setToolTip(country_code if country_code else "Unknown")
-            self.table.setCellWidget(row, 5, country_widget)
+            country_item = QTableWidgetItem(country_code)
+            country_item.setIcon(get_icon("proxy", 14))
+            country_item.setToolTip(country_code if country_code else "Unknown")
+            country_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
+            self.table.setItem(row, 5, country_item)
 
             # Ping
             if proxy.ping_ms > 0:
@@ -231,15 +258,35 @@ class ProxyPage(QWidget):
             actions_widget = self._create_actions_widget(row)
             self.table.setCellWidget(row, 7, actions_widget)
 
+        self._update_selection()
+        self._update_header_state()
+
     def _create_actions_widget(self, row: int) -> QWidget:
         """Create actions widget for row."""
         widget = QWidget()
+        widget.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+        widget.customContextMenuRequested.connect(
+            lambda _pos, r=row, w=widget: self._show_row_context_menu(
+                r, w.mapToGlobal(w.rect().bottomLeft())
+            )
+        )
         layout = QHBoxLayout(widget)
         layout.setContentsMargins(4, 0, 4, 0)
         layout.setSpacing(4)
         layout.setAlignment(Qt.AlignmentFlag.AlignVCenter)
 
         btn_size = Theme.BTN_ICON_SIZE
+
+        menu_btn = QPushButton("⋯")
+        menu_btn.setFixedSize(btn_size, btn_size)
+        menu_btn.setProperty("class", "icon")
+        menu_btn.setToolTip("Menu")
+        menu_btn.clicked.connect(
+            lambda checked=False, r=row, w=menu_btn: self._show_row_context_menu(
+                r, w.mapToGlobal(w.rect().bottomLeft())
+            )
+        )
+        layout.addWidget(menu_btn)
 
         # Edit button
         edit_btn = QPushButton()
@@ -280,12 +327,16 @@ class ProxyPage(QWidget):
         if not text:
             return
 
-        new_proxies = parse_proxy_list(text)
+        new_proxies, errors = parse_proxy_list(text)
         if new_proxies:
             self.proxies.extend(new_proxies)
             self._refresh_table()
             self.proxy_input.clear()
             self.proxy_pool_changed.emit(self.proxies)
+
+        if errors:
+            self._set_error(self.proxy_input, True)
+            self._alert.show_error("Parse Errors", f"{len(errors)} line(s) failed to parse.")
 
     def _delete_proxy(self, row: int):
         """Delete proxy at row."""
@@ -298,10 +349,8 @@ class ProxyPage(QWidget):
         """Edit proxy at row."""
         if 0 <= row < len(self.proxies):
             proxy = self.proxies[row]
-            # Format: host:port or host:port:user:pass
             current = proxy.host
-            if proxy.port:
-                current += f":{proxy.port}"
+            current += f":{proxy.port}"
             if proxy.username and proxy.password:
                 current += f":{proxy.username}:{proxy.password}"
 
@@ -314,15 +363,26 @@ class ProxyPage(QWidget):
                 text=current,
             )
             if ok and new_value:
-                parsed = parse_proxy_list(new_value)
+                parsed, errors = parse_proxy_list(new_value)
                 if parsed:
                     self.proxies[row] = parsed[0]
                     self._refresh_table()
                     self.proxy_pool_changed.emit(self.proxies)
+                if errors:
+                    self._alert.show_error("Parse Errors", f"{len(errors)} line(s) failed to parse.")
+
+    def _set_error(self, widget: QWidget, is_error: bool) -> None:
+        widget.setProperty("error", "true" if is_error else "false")
+        widget.style().unpolish(widget)
+        widget.style().polish(widget)
+
+    def _clear_error(self, widget: QWidget) -> None:
+        self._set_error(widget, False)
+        self._alert.hide()
 
     def _ping_proxy_clicked(self, row: int):
         """Handle ping button click - wrapper for async call."""
-        asyncio.ensure_future(self._ping_proxy_async(row))
+        self._spawn_task(self._ping_proxy_async(row), context=f"ping_proxy(row={row})")
 
     async def _ping_proxy_async(self, row: int):
         """Ping single proxy (async implementation)."""
@@ -342,7 +402,29 @@ class ProxyPage(QWidget):
 
     def _ping_all_clicked(self):
         """Handle ping all button click - wrapper for async call."""
-        asyncio.ensure_future(self._ping_all_async())
+        self._spawn_task(self._ping_all_async(), context="ping_all_proxies")
+
+    def _spawn_task(self, coro, context: str) -> None:
+        """Run coroutine in the background and log exceptions."""
+        logger = logging.getLogger(__name__)
+        try:
+            task = asyncio.create_task(coro)
+        except RuntimeError as e:
+            logger.warning("Cannot start task (%s): %s", context, e)
+            return
+
+        def _done(t: asyncio.Task) -> None:
+            try:
+                exc = t.exception()
+            except asyncio.CancelledError:
+                return
+            except Exception as e:
+                logger.warning("Task exception retrieval failed (%s): %s", context, e)
+                return
+            if exc is not None:
+                logger.exception("Background task failed (%s)", context, exc_info=exc)
+
+        task.add_done_callback(_done)
 
     async def _ping_all_async(self):
         """Ping all proxies concurrently."""
@@ -388,12 +470,23 @@ class ProxyPage(QWidget):
 
     # --- Checkbox / Selection methods ---
 
-    def add_checkbox_to_row(self, row: int) -> None:
+    def add_checkbox_to_row(self, row: int, checked: bool = False) -> None:
         """Add checkbox widget to row."""
         checkbox = CheckboxWidget()
+        checkbox.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+        checkbox.customContextMenuRequested.connect(
+            lambda pos, r=row, w=checkbox: self._show_row_context_menu(
+                r, w.mapToGlobal(pos)
+            )
+        )
         checkbox.toggled.connect(
             lambda checked, r=row: self._on_row_checkbox_toggled(r, checked)
         )
+        if checked:
+            checkbox.blockSignals(True)
+            checkbox.setChecked(True)
+            checkbox.blockSignals(False)
+            self._selected_rows.append(row)
         self.table.setCellWidget(row, 0, checkbox)
 
     def _on_header_section_clicked(self, section: int) -> None:
@@ -419,6 +512,7 @@ class ProxyPage(QWidget):
         else:
             self._selected_rows.clear()
         self._update_selection()
+        self._update_header_state()
 
     def _on_row_checkbox_toggled(self, row: int, checked: bool) -> None:
         """Handle row checkbox toggle."""
@@ -470,8 +564,6 @@ class ProxyPage(QWidget):
         indices = self.get_selected_proxy_indices()
         if indices:
             self.batch_delete.emit(indices)
-            # Deselect all after delete
-            self._toggle_all_checkboxes(False)
 
     # === Header checkbox positioning ===
 

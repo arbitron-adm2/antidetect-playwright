@@ -23,12 +23,13 @@ logger = logging.getLogger(__name__)
 
 class StorageError(Exception):
     """Base exception for storage errors."""
+
     pass
 
 
 class ProfileNotFoundError(StorageError):
     """Raised when profile is not found."""
-    
+
     def __init__(self, profile_id: str):
         self.profile_id = profile_id
         super().__init__(f"Profile not found: {profile_id}")
@@ -36,11 +37,13 @@ class ProfileNotFoundError(StorageError):
 
 class InvalidProfileDataError(StorageError):
     """Raised when profile data is invalid or corrupted."""
+
     pass
 
 
 class StorageCorruptedError(StorageError):
     """Raised when storage file is corrupted."""
+
     pass
 
 
@@ -55,47 +58,51 @@ class Storage:
         self._folders_file = self._data_dir / "folders.json"
         self._settings_file = self._data_dir / "settings.json"
         self._proxy_pool_file = self._data_dir / "proxy_pool.json"
+        # Backward-compat: legacy tags-only pool
         self._tags_pool_file = self._data_dir / "tags_pool.json"
+        # Unified labels pool (tags/statuses/note templates)
+        self._labels_pool_file = self._data_dir / "labels_pool.json"
         self._trash_file = self._data_dir / "trash.json"
 
         self._profiles: list[BrowserProfile] = []
         self._folders: list[Folder] = []
         self._settings: AppSettings = AppSettings()
         self._proxy_pool: ProxyPool = ProxyPool()
+        # Labels pool
         self._tags_pool: list[str] = []
+        self._statuses_pool: list[tuple[str, str]] = []  # (name, color)
+        self._note_templates_pool: list[tuple[str, str]] = []  # (name, content)
         self._trash: list[dict] = []
-        
+
         # Profile ID index for O(1) lookup
         self._profile_index: dict[str, BrowserProfile] = {}
 
         self._load_all()
-    
+
     def _rebuild_index(self) -> None:
         """Rebuild profile index after load/modify."""
         self._profile_index = {p.id: p for p in self._profiles}
-    
+
     def _atomic_write(self, path: Path, data: str) -> None:
         """Write file atomically to prevent corruption.
-        
+
         Args:
             path: Destination file path
             data: JSON data to write
-            
+
         Raises:
             StorageError: If write fails
         """
         # Write to temp file in same directory (same filesystem)
         try:
             fd, temp_path = tempfile.mkstemp(
-                dir=path.parent,
-                prefix=f".{path.stem}_",
-                suffix=".tmp"
+                dir=path.parent, prefix=f".{path.stem}_", suffix=".tmp"
             )
         except OSError as e:
             raise StorageError(f"Failed to create temp file: {e}")
-        
+
         try:
-            with open(fd, 'w', encoding='utf-8') as f:
+            with open(fd, "w", encoding="utf-8") as f:
                 f.write(data)
             # Atomic rename
             Path(temp_path).replace(path)
@@ -114,12 +121,95 @@ class Storage:
         self._load_folders()
         self._load_settings()
         self._load_proxy_pool()
-        self._load_tags_pool()
+        self._load_labels_pool()
         self._load_trash()
+
+    # === Labels pool (tags/statuses/note templates) ===
+
+    def _load_labels_pool(self) -> None:
+        """Load unified labels pool from file.
+
+        Backward-compat: if labels_pool.json is missing, try migrating tags_pool.json.
+        """
+        if self._labels_pool_file.exists():
+            try:
+                data = json.loads(self._labels_pool_file.read_text(encoding="utf-8"))
+
+                tags = data.get("tags", [])
+                if isinstance(tags, list):
+                    self._tags_pool = [t for t in tags if isinstance(t, str) and t]
+                else:
+                    self._tags_pool = []
+
+                statuses: list[tuple[str, str]] = []
+                raw_statuses = data.get("statuses", [])
+                if isinstance(raw_statuses, list):
+                    for item in raw_statuses:
+                        if isinstance(item, dict):
+                            name = str(item.get("name", "")).strip()
+                            color = str(item.get("color", "")).strip()
+                            if name and color:
+                                statuses.append((name, color))
+                self._statuses_pool = statuses
+
+                templates: list[tuple[str, str]] = []
+                raw_templates = data.get("note_templates", [])
+                if isinstance(raw_templates, list):
+                    for item in raw_templates:
+                        if isinstance(item, dict):
+                            name = str(item.get("name", "")).strip()
+                            content = str(item.get("content", "")).strip()
+                            if name and content:
+                                templates.append((name, content))
+                self._note_templates_pool = templates
+
+                return
+            except json.JSONDecodeError as e:
+                logger.error("Invalid JSON in labels pool file: %s", e)
+                self._tags_pool = []
+                self._statuses_pool = []
+                self._note_templates_pool = []
+                return
+
+        # Migration path: legacy tags_pool.json
+        self._load_tags_pool_legacy()
+        self._statuses_pool = []
+        self._note_templates_pool = []
+        # Persist in new unified format (best-effort)
+        try:
+            self.save_labels_pool()
+        except StorageError:
+            # Don't fail startup on migration write; keep in-memory data.
+            pass
+
+    def _load_tags_pool_legacy(self) -> None:
+        """Load legacy tags pool from tags_pool.json (tags-only)."""
+        if self._tags_pool_file.exists():
+            try:
+                data = json.loads(self._tags_pool_file.read_text(encoding="utf-8"))
+                tags = data.get("tags", [])
+                if isinstance(tags, list):
+                    self._tags_pool = [t for t in tags if isinstance(t, str) and t]
+                else:
+                    self._tags_pool = []
+            except json.JSONDecodeError as e:
+                logger.error("Invalid JSON in tags pool file: %s", e)
+                self._tags_pool = []
+
+    def save_labels_pool(self) -> None:
+        """Save unified labels pool to labels_pool.json."""
+        data = {
+            "tags": list(self._tags_pool),
+            "statuses": [{"name": n, "color": c} for n, c in self._statuses_pool],
+            "note_templates": [
+                {"name": n, "content": c} for n, c in self._note_templates_pool
+            ],
+        }
+        self._atomic_write(self._labels_pool_file, json.dumps(data, indent=2))
 
     def _load_profiles(self) -> None:
         """Load profiles from file.
-        
+
         Raises:
             StorageCorruptedError: If profiles file is corrupted
         """
@@ -127,14 +217,14 @@ class Storage:
             logger.info("Profiles file doesn't exist, starting with empty list")
             self._profiles = []
             return
-        
+
         try:
-            data = json.loads(self._profiles_file.read_text(encoding='utf-8'))
+            data = json.loads(self._profiles_file.read_text(encoding="utf-8"))
             profiles_data = data.get("profiles", [])
-            
+
             if not isinstance(profiles_data, list):
                 raise InvalidProfileDataError("Profiles data is not a list")
-            
+
             self._profiles = []
             for i, p in enumerate(profiles_data):
                 try:
@@ -143,10 +233,10 @@ class Storage:
                 except Exception as e:
                     logger.error(f"Failed to load profile #{i}: {e}")
                     # Continue loading other profiles
-            
+
             self._rebuild_index()
             logger.info(f"Loaded {len(self._profiles)} profiles")
-            
+
         except json.JSONDecodeError as e:
             logger.error(f"Invalid JSON in profiles file: {e}")
             raise StorageCorruptedError(f"Profiles file is corrupted: {e}")
@@ -194,7 +284,7 @@ class Storage:
                     password = p.get("password", "")
                     if password and p.get("password_encrypted", False):
                         password = SecurePasswordEncryption.decrypt(password)
-                    
+
                     proxy = ProxyConfig(
                         enabled=True,
                         proxy_type=ProxyType(p.get("proxy_type", "http")),
@@ -227,7 +317,9 @@ class Storage:
 
     def save_settings(self) -> None:
         """Save settings to file."""
-        self._atomic_write(self._settings_file, json.dumps(self._settings.to_dict(), indent=2))
+        self._atomic_write(
+            self._settings_file, json.dumps(self._settings.to_dict(), indent=2)
+        )
 
     def save_proxy_pool(self) -> None:
         """Save proxy pool to file with encrypted passwords."""
@@ -238,7 +330,11 @@ class Storage:
                     "host": p.host,
                     "port": p.port,
                     "username": p.username,
-                    "password": SecurePasswordEncryption.encrypt(p.password) if p.password else "",
+                    "password": (
+                        SecurePasswordEncryption.encrypt(p.password)
+                        if p.password
+                        else ""
+                    ),
                     "password_encrypted": bool(p.password),
                     "country_code": p.country_code,
                     "country_name": p.country_name,
@@ -272,53 +368,54 @@ class Storage:
 
     def get_profile(self, profile_id: str) -> BrowserProfile:
         """Get profile by ID with O(1) lookup.
-        
+
         Args:
             profile_id: Profile UUID
-            
+
         Returns:
             Profile instance
-            
+
         Raises:
             ValueError: If profile_id is invalid UUID
             ProfileNotFoundError: If profile not found
         """
         if not validate_uuid(profile_id):
             raise ValueError(f"Invalid profile ID format: {profile_id}")
-        
+
         profile = self._profile_index.get(profile_id)
         if not profile:
             raise ProfileNotFoundError(profile_id)
-        
+
         return profile
 
     def add_profile(self, profile: BrowserProfile) -> None:
         """Add new profile.
-        
+
         Args:
             profile: Profile to add
-            
+
         Raises:
             ValueError: If profile ID is invalid or already exists
             StorageError: If save fails
         """
         if not validate_uuid(profile.id):
             raise ValueError(f"Invalid profile ID format: {profile.id}")
-        
+
         if profile.id in self._profile_index:
             raise ValueError(f"Profile with ID {profile.id} already exists")
-        
+
         self._profiles.append(profile)
         self._profile_index[profile.id] = profile
+        self._ensure_tags_in_pool(profile.tags)
         logger.info(f"Added profile: {profile.name} ({profile.id})")
         self.save_profiles()
 
     def update_profile(self, profile: BrowserProfile) -> None:
         """Update existing profile.
-        
+
         Args:
             profile: Profile with updated data
-            
+
         Raises:
             ValueError: If profile ID is invalid
             ProfileNotFoundError: If profile doesn't exist
@@ -326,27 +423,28 @@ class Storage:
         """
         if not validate_uuid(profile.id):
             raise ValueError(f"Invalid profile ID format: {profile.id}")
-        
+
         # Check if profile exists
         if profile.id not in self._profile_index:
             raise ProfileNotFoundError(profile.id)
-        
+
         for i, p in enumerate(self._profiles):
             if p.id == profile.id:
                 self._profiles[i] = profile
                 self._profile_index[profile.id] = profile
+                self._ensure_tags_in_pool(profile.tags)
                 logger.info(f"Updated profile: {profile.name} ({profile.id})")
                 break
-        
+
         self.save_profiles()
 
     def delete_profile(self, profile_id: str, move_to_trash: bool = True) -> None:
         """Delete profile, optionally moving to trash.
-        
+
         Args:
             profile_id: Profile UUID to delete
             move_to_trash: If True, move to trash; if False, permanently delete
-            
+
         Raises:
             ValueError: If profile_id is invalid
             ProfileNotFoundError: If profile doesn't exist
@@ -358,7 +456,7 @@ class Storage:
         profile = self._profile_index.get(profile_id)
         if not profile:
             raise ProfileNotFoundError(profile_id)
-        
+
         if move_to_trash:
             trash_item = {
                 "id": profile.id,
@@ -420,6 +518,11 @@ class Storage:
         """Get proxy pool."""
         return self._proxy_pool
 
+    def set_proxy_pool(self, proxies: list[ProxyConfig]) -> None:
+        """Replace proxy pool and persist it."""
+        self._proxy_pool = ProxyPool(proxies=list(proxies))
+        self.save_proxy_pool()
+
     def add_proxy_to_pool(self, proxy: ProxyConfig) -> None:
         """Add proxy to pool."""
         self._proxy_pool.add_proxy(proxy)
@@ -434,21 +537,26 @@ class Storage:
         self._proxy_pool = ProxyPool()
         self.save_proxy_pool()
 
-    # Tags Pool
-    def _load_tags_pool(self) -> None:
-        """Load tags pool from file."""
-        if self._tags_pool_file.exists():
-            try:
-                data = json.loads(self._tags_pool_file.read_text())
-                self._tags_pool = data.get("tags", [])
-            except json.JSONDecodeError as e:
-                logger.error("Invalid JSON in tags pool file: %s", e)
-                self._tags_pool = []
+    def get_browser_data_dir(self) -> Path:
+        """Get root directory for browser profile data."""
+        path = self._data_dir / "browser_data"
+        path.mkdir(parents=True, exist_ok=True)
+        return path
 
-    def save_tags_pool(self) -> None:
-        """Save tags pool to file."""
-        data = {"tags": self._tags_pool}
-        self._atomic_write(self._tags_pool_file, json.dumps(data, indent=2))
+    def _ensure_tags_in_pool(self, tags: list[str]) -> None:
+        """Ensure tags exist in labels pool and persist if changed."""
+        changed = False
+        for tag in tags:
+            if not isinstance(tag, str):
+                continue
+            normalized = tag.strip()
+            if not normalized:
+                continue
+            if normalized not in self._tags_pool:
+                self._tags_pool.append(normalized)
+                changed = True
+        if changed:
+            self.save_labels_pool()
 
     def get_tags_pool(self) -> list[str]:
         """Get tags pool."""
@@ -456,22 +564,21 @@ class Storage:
 
     def add_tag_to_pool(self, tag: str) -> None:
         """Add tag to pool."""
-        if tag and tag not in self._tags_pool:
-            self._tags_pool.append(tag)
-            self.save_tags_pool()
+        if tag:
+            self._ensure_tags_in_pool([tag])
 
     def remove_tag_from_pool(self, tag: str) -> None:
         """Remove tag from pool."""
         if tag in self._tags_pool:
             self._tags_pool.remove(tag)
-            self.save_tags_pool()
+            self.save_labels_pool()
 
     def rename_tag_in_pool(self, old_name: str, new_name: str) -> None:
         """Rename tag in pool."""
         if old_name in self._tags_pool and new_name:
             idx = self._tags_pool.index(old_name)
             self._tags_pool[idx] = new_name
-            self.save_tags_pool()
+            self.save_labels_pool()
 
     def get_all_tags(self) -> list[str]:
         """Get all unique tags from profiles and pool."""
@@ -479,6 +586,79 @@ class Storage:
         for p in self._profiles:
             tags.update(p.tags)
         return sorted(list(tags))
+
+    # Statuses pool
+    def get_statuses_pool(self) -> list[tuple[str, str]]:
+        """Get custom statuses pool."""
+        return list(self._statuses_pool)
+
+    def add_status_to_pool(self, name: str, color: str) -> None:
+        """Add custom status to pool."""
+        name = (name or "").strip()
+        color = (color or "").strip()
+        if not name or not color:
+            return
+        if any(n == name for n, _ in self._statuses_pool):
+            return
+        self._statuses_pool.append((name, color))
+        self.save_labels_pool()
+
+    def remove_status_from_pool(self, name: str) -> None:
+        """Remove custom status from pool."""
+        name = (name or "").strip()
+        if not name:
+            return
+        before = len(self._statuses_pool)
+        self._statuses_pool = [(n, c) for n, c in self._statuses_pool if n != name]
+        if len(self._statuses_pool) != before:
+            self.save_labels_pool()
+
+    def rename_status_in_pool(self, old_name: str, new_name: str, color: str) -> None:
+        """Rename custom status in pool."""
+        old_name = (old_name or "").strip()
+        new_name = (new_name or "").strip()
+        color = (color or "").strip()
+        if not old_name or not new_name or not color:
+            return
+        updated: list[tuple[str, str]] = []
+        changed = False
+        for n, c in self._statuses_pool:
+            if n == old_name:
+                updated.append((new_name, color))
+                changed = True
+            else:
+                updated.append((n, c))
+        if changed:
+            self._statuses_pool = updated
+            self.save_labels_pool()
+
+    # Note templates pool
+    def get_note_templates_pool(self) -> list[tuple[str, str]]:
+        """Get note templates pool."""
+        return list(self._note_templates_pool)
+
+    def add_note_template_to_pool(self, name: str, content: str) -> None:
+        """Add note template to pool."""
+        name = (name or "").strip()
+        content = (content or "").strip()
+        if not name or not content:
+            return
+        if any(n == name for n, _ in self._note_templates_pool):
+            return
+        self._note_templates_pool.append((name, content))
+        self.save_labels_pool()
+
+    def remove_note_template_from_pool(self, name: str) -> None:
+        """Remove note template from pool."""
+        name = (name or "").strip()
+        if not name:
+            return
+        before = len(self._note_templates_pool)
+        self._note_templates_pool = [
+            (n, c) for n, c in self._note_templates_pool if n != name
+        ]
+        if len(self._note_templates_pool) != before:
+            self.save_labels_pool()
 
     # Trash
     def _load_trash(self) -> None:

@@ -96,6 +96,8 @@ min_height = 700
 sidebar_width = 220
 # Items per page in table
 items_per_page = 25
+# Inline UI alerts (non-modal warnings/errors)
+inline_alert_ttl_ms = 2500
 # Theme: dark, light
 theme = "dark"
 # Enable Chrome-like theme for Camoufox browser
