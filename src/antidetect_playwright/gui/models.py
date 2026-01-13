@@ -283,6 +283,9 @@ class AppSettings:
     exclude_bpc: bool = False
     custom_addons: list[str] = field(default_factory=list)
 
+    # Custom browser path (empty = use bundled Camoufox)
+    browser_executable_path: str = ""
+
     # Debug
     debug_mode: bool = False
 
@@ -304,6 +307,7 @@ class AppSettings:
             "exclude_ublock": self.exclude_ublock,
             "exclude_bpc": self.exclude_bpc,
             "custom_addons": self.custom_addons,
+            "browser_executable_path": self.browser_executable_path,
             "debug_mode": self.debug_mode,
         }
 
@@ -326,5 +330,6 @@ class AppSettings:
             exclude_ublock=data.get("exclude_ublock", False),
             exclude_bpc=data.get("exclude_bpc", False),
             custom_addons=data.get("custom_addons", []),
+            browser_executable_path=data.get("browser_executable_path", ""),
             debug_mode=data.get("debug_mode", False),
         )

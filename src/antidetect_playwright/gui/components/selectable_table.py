@@ -202,7 +202,7 @@ class SelectableTable(QTableWidget):
 
     def reset_selection(self):
         """Reset all selection state including header checkbox.
-        
+
         Use this after destructive operations like delete.
         """
         self._updating_selection = True

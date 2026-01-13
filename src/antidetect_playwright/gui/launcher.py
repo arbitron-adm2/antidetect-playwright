@@ -2,7 +2,6 @@
 
 import json
 import logging
-import shutil
 from pathlib import Path
 from typing import Callable
 import asyncio
@@ -15,9 +14,6 @@ import orjson
 from .models import BrowserProfile, ProfileStatus, ProxyConfig
 
 logger = logging.getLogger(__name__)
-
-# Path to bundled Chrome theme (Material Fox)
-CHROME_THEME_DIR = Path(__file__).parent.parent / "resources" / "chrome" / "chrome"
 
 # Screen/window dimension keys that should NOT be persisted or spoofed
 # These values are spoofed by Camoufox via JavaScript API overrides
@@ -48,7 +44,7 @@ SCREEN_WINDOW_KEYS_TO_EXCLUDE = {
 
 def _remove_screen_window_keys_from_env(env: dict) -> dict:
     """Remove screen/window keys from CAMOU_CONFIG_* env vars.
-    
+
     Camoufox serializes config into CAMOU_CONFIG_1, CAMOU_CONFIG_2, etc.
     We need to deserialize, remove keys, and re-serialize.
     """
@@ -58,10 +54,10 @@ def _remove_screen_window_keys_from_env(env: dict) -> dict:
     while f"CAMOU_CONFIG_{i}" in env:
         chunks.append(env[f"CAMOU_CONFIG_{i}"])
         i += 1
-    
+
     if not chunks:
         return env
-    
+
     # Reconstruct full config JSON
     full_config_str = "".join(chunks)
     try:
@@ -69,31 +65,32 @@ def _remove_screen_window_keys_from_env(env: dict) -> dict:
     except Exception as e:
         logger.warning(f"Failed to parse CAMOU_CONFIG: {e}")
         return env
-    
+
     # Remove screen/window keys
     removed = []
     for key in list(config.keys()):
         if key in SCREEN_WINDOW_KEYS_TO_EXCLUDE:
             del config[key]
             removed.append(key)
-    
+
     if removed:
         logger.debug(f"Removed screen/window keys from config: {removed}")
-    
+
     # Re-serialize
-    new_config_str = orjson.dumps(config).decode('utf-8')
-    
+    new_config_str = orjson.dumps(config).decode("utf-8")
+
     # Clear old chunks
     for j in range(1, i):
         del env[f"CAMOU_CONFIG_{j}"]
-    
+
     # Split into new chunks (same chunk size logic as Camoufox)
     import sys
-    chunk_size = 2047 if sys.platform == 'win32' else 32767
+
+    chunk_size = 2047 if sys.platform == "win32" else 32767
     for j, start in enumerate(range(0, len(new_config_str), chunk_size)):
-        chunk = new_config_str[start:start + chunk_size]
+        chunk = new_config_str[start : start + chunk_size]
         env[f"CAMOU_CONFIG_{j + 1}"] = chunk
-    
+
     return env
 
 
@@ -141,38 +138,64 @@ class BrowserLauncher:
             user_data_dir = self._data_dir / profile.id
             user_data_dir.mkdir(parents=True, exist_ok=True)
 
-            # Copy Chrome theme (Material Fox) to profile if not exists
-            chrome_dir = user_data_dir / "chrome"
-            if CHROME_THEME_DIR.exists() and not chrome_dir.exists():
-                shutil.copytree(CHROME_THEME_DIR, chrome_dir)
-
             proxy = profile.proxy.to_camoufox()
 
-            # If no proxy, detect current IP and set GeoIP for timezone/locale
+            # Detect current IP for timezone and geolocation
+            # Use Camoufox's MaxMind database for accurate timezone matching
+            from camoufox.ip import public_ip, Proxy as CamoufoxProxy
+            from camoufox.locale import get_geolocation, geoip_allowed
+
             geoip_info = None
-            if not proxy:
-                from .geoip import get_current_ip_info
-                geoip_info = await get_current_ip_info()
-                if geoip_info:
-                    logger.info(f"Detected IP: {geoip_info.ip} ({geoip_info.country_code}, {geoip_info.timezone})")
-                    # Update profile with current IP info for display
-                    if not profile.proxy:
-                        profile.proxy = ProxyConfig()
-                    profile.proxy.country_code = geoip_info.country_code
-                    profile.proxy.timezone = geoip_info.timezone
-                    profile.proxy.city = geoip_info.city
+            try:
+                geoip_allowed()  # Check if geoip extra is installed
+
+                # Get public IP (through proxy if configured)
+                if proxy:
+                    proxy_str = CamoufoxProxy(**proxy).as_string()
+                    ip = public_ip(proxy_str)
+                else:
+                    ip = public_ip()
+
+                # Get geolocation from MaxMind database
+                geolocation = get_geolocation(ip)
+
+                # Create geoip_info compatible object
+                class GeoIPInfoCompat:
+                    def __init__(self, ip, geolocation):
+                        self.ip = ip
+                        self.country_code = geolocation.locale.region or "XX"
+                        self.timezone = geolocation.timezone
+                        self.city = ""
+                        self.lat = geolocation.latitude
+                        self.lon = geolocation.longitude
+
+                geoip_info = GeoIPInfoCompat(ip, geolocation)
+                logger.info(
+                    f"Detected IP: {geoip_info.ip} ({geoip_info.country_code}, {geoip_info.timezone})"
+                )
+                # Update profile with IP info for display (flag emoji)
+                if not profile.proxy:
+                    profile.proxy = ProxyConfig()
+                profile.proxy.country_code = geoip_info.country_code
+                profile.proxy.timezone = geoip_info.timezone
+                profile.proxy.city = geoip_info.city
+            except Exception as e:
+                logger.warning(f"Failed to get GeoIP info: {e}")
 
             logger.info("Starting profile: %s", profile.name)
-            logger.debug("Proxy configured: host=%s, port=%s", 
-                        profile.proxy.host if profile.proxy else None,
-                        profile.proxy.port if profile.proxy else None)
+            logger.debug(
+                "Proxy configured: host=%s, port=%s",
+                profile.proxy.host if profile.proxy else None,
+                profile.proxy.port if profile.proxy else None,
+            )
             logger.debug("Data dir: %s", user_data_dir)
 
             # Camoufox options - maximum protection + user settings
             camoufox_options = {
                 "headless": False,
-                # GeoIP auto-detects timezone/locale from proxy IP or use detected timezone
-                "geoip": proxy is not None,
+                # We handle geoip ourselves via ip-api.com to ensure timezone matches IP
+                # Camoufox geoip uses MaxMind which may return different timezone
+                "geoip": False,
                 # Block WebRTC to prevent IP leak
                 "block_webrtc": True,
                 # Human-like cursor movement (from settings)
@@ -187,18 +210,15 @@ class BrowserLauncher:
                 # Disable fixed viewport so browser content scales with window
                 "no_viewport": True,
                 # Performance settings
-                "block_images": self._settings.block_images if self._settings else False,
+                "block_images": (
+                    self._settings.block_images if self._settings else False
+                ),
                 "enable_cache": self._settings.enable_cache if self._settings else True,
                 # Debug mode
                 "debug": self._settings.debug_mode if self._settings else False,
-                # Enable Chrome theme (Material Fox userChrome.css)
+                # Firefox user prefs - only session settings from launcher
+                # All styles and UI customizations are handled via browser build
                 "firefox_user_prefs": {
-                    # Enable Chrome theme (userChrome.css)
-                    "toolkit.legacyUserProfileCustomizations.stylesheets": True,
-                    # Chrome-like behaviour for clipped tabs
-                    "browser.tabs.tabClipWidth": 83,
-                    # Show "Not Secure" on HTTP like Chrome
-                    "security.insecure_connection_text.enabled": True,
                     # Session restore settings - controlled by save_tabs
                     **(
                         {
@@ -220,10 +240,20 @@ class BrowserLauncher:
 
             if proxy:
                 camoufox_options["proxy"] = proxy
-            
+
+            # Custom browser executable path
+            if self._settings and self._settings.browser_executable_path:
+                browser_path = Path(self._settings.browser_executable_path)
+                if browser_path.exists():
+                    camoufox_options["executable_path"] = str(browser_path)
+                    logger.info(f"Using custom browser: {browser_path}")
+                else:
+                    logger.warning(f"Custom browser not found: {browser_path}")
+
             # Extensions (default: uBlock Origin, BPC)
             if self._settings:
                 from camoufox import DefaultAddons
+
                 exclude_addons = []
                 if self._settings.exclude_ublock:
                     exclude_addons.append(DefaultAddons.UBO)
@@ -231,7 +261,7 @@ class BrowserLauncher:
                     exclude_addons.append(DefaultAddons.BPC)
                 if exclude_addons:
                     camoufox_options["exclude_addons"] = exclude_addons
-                
+
                 # Custom addons
                 if self._settings.custom_addons:
                     camoufox_options["addons"] = self._settings.custom_addons
@@ -256,10 +286,71 @@ class BrowserLauncher:
             # Screen/window keys are removed later via _remove_screen_window_keys_from_env()
 
             fingerprint_file = user_data_dir / "fingerprint.json"
+
+            # Check if OS changed - if so, regenerate fingerprint
+            regenerate_fingerprint = False
             if fingerprint_file.exists():
+                fp_data = json.loads(fingerprint_file.read_text())
+                saved_os = fp_data.get("os", "")
+                current_os = profile.os_type or "windows"
+                if saved_os != current_os:
+                    logger.info(
+                        f"OS changed from '{saved_os}' to '{current_os}' - regenerating fingerprint"
+                    )
+                    regenerate_fingerprint = True
+                    fingerprint_file.unlink()  # Delete old fingerprint
+
+            if fingerprint_file.exists() and not regenerate_fingerprint:
                 # Load saved fingerprint config
                 fp_data = json.loads(fingerprint_file.read_text())
                 fp_config = fp_data.get("fingerprint", {})
+
+                # Remove old timezone - we'll set fresh one from current IP
+                fp_config.pop("locale:timezone", None)
+                fp_config.pop("timezone", None)
+                fp_config.pop("geolocation:latitude", None)
+                fp_config.pop("geolocation:longitude", None)
+                fp_config.pop("locale:region", None)
+                fp_config.pop("locale:language", None)
+
+                # Set fresh timezone/geolocation from current IP
+                # This ensures timezone always matches current IP
+                if geoip_info:
+                    fp_config["timezone"] = geoip_info.timezone
+                    if geoip_info.lat and geoip_info.lon:
+                        fp_config["geolocation:latitude"] = geoip_info.lat
+                        fp_config["geolocation:longitude"] = geoip_info.lon
+                    fp_config["locale:region"] = geoip_info.country_code
+                    country_to_lang = {
+                        "RU": "ru",
+                        "US": "en",
+                        "GB": "en",
+                        "DE": "de",
+                        "FR": "fr",
+                        "ES": "es",
+                        "IT": "it",
+                        "PT": "pt",
+                        "NL": "nl",
+                        "PL": "pl",
+                        "UA": "uk",
+                        "BY": "be",
+                        "KZ": "kk",
+                        "CN": "zh",
+                        "JP": "ja",
+                        "KR": "ko",
+                        "BR": "pt",
+                        "AR": "es",
+                        "MX": "es",
+                        "IN": "hi",
+                        "TR": "tr",
+                        "SA": "ar",
+                        "IL": "he",
+                        "TH": "th",
+                        "VN": "vi",
+                    }
+                    fp_config["locale:language"] = country_to_lang.get(
+                        geoip_info.country_code, "en"
+                    )
 
                 # Remove screen/window dimension keys so Camoufox uses real sizes
                 for key in list(fp_config.keys()):
@@ -294,9 +385,13 @@ class BrowserLauncher:
                 from camoufox.webgl import sample_webgl
                 from random import randint, randrange
 
+                # Use OS from profile config (windows/macos/linux)
+                # Camoufox handles platform hints spoofing internally
+                fp_os = profile.os_type or "windows"
+
                 generator = FingerprintGenerator(
                     browser="firefox",
-                    os=camoufox_options.get("os", ["windows", "macos", "linux"]),
+                    os=fp_os,
                 )
                 fingerprint = generator.generate()
                 # Convert to Camoufox config dict
@@ -313,10 +408,62 @@ class BrowserLauncher:
                 fp_config["fonts:spacing_seed"] = fonts_spacing_seed
                 fp_config["window.history.length"] = history_length
 
-                # If no proxy but GeoIP detected, set timezone from real IP
-                if not proxy and geoip_info:
+                # Fix Firefox version to match Camoufox real version (135)
+                # BrowserForge may generate newer versions which triggers detection
+                if "navigator.userAgent" in fp_config:
+                    ua = fp_config["navigator.userAgent"]
+                    # Replace any Firefox version with 135.0
+                    import re
+
+                    ua = re.sub(r"Firefox/\d+\.\d+", "Firefox/135.0", ua)
+                    ua = re.sub(r"rv:\d+\.\d+", "rv:135.0", ua)
+                    fp_config["navigator.userAgent"] = ua
+
+                # Set timezone, geolocation and locale from our GeoIP detection
+                # This ensures timezone matches IP (BrowserScan checks this)
+                if geoip_info:
+                    # Timezone must match IP location exactly
                     fp_config["timezone"] = geoip_info.timezone
-                    logger.info(f"Set timezone from GeoIP: {geoip_info.timezone}")
+                    # Geolocation coordinates
+                    if geoip_info.lat and geoip_info.lon:
+                        fp_config["geolocation:latitude"] = geoip_info.lat
+                        fp_config["geolocation:longitude"] = geoip_info.lon
+                    # Locale based on country
+                    fp_config["locale:region"] = geoip_info.country_code
+                    # Language based on country (simplified mapping)
+                    country_to_lang = {
+                        "RU": "ru",
+                        "US": "en",
+                        "GB": "en",
+                        "DE": "de",
+                        "FR": "fr",
+                        "ES": "es",
+                        "IT": "it",
+                        "PT": "pt",
+                        "NL": "nl",
+                        "PL": "pl",
+                        "UA": "uk",
+                        "BY": "be",
+                        "KZ": "kk",
+                        "CN": "zh",
+                        "JP": "ja",
+                        "KR": "ko",
+                        "BR": "pt",
+                        "AR": "es",
+                        "MX": "es",
+                        "IN": "hi",
+                        "TR": "tr",
+                        "SA": "ar",
+                        "IL": "he",
+                        "TH": "th",
+                        "VN": "vi",
+                    }
+                    fp_config["locale:language"] = country_to_lang.get(
+                        geoip_info.country_code, "en"
+                    )
+                    logger.info(
+                        f"Set geolocation from IP: tz={geoip_info.timezone}, lat={geoip_info.lat}, lon={geoip_info.lon}"
+                    )
 
                 # Remove screen/window dimension keys so Camoufox uses real sizes
                 for key in list(fp_config.keys()):
@@ -326,9 +473,9 @@ class BrowserLauncher:
                 # Pass as config dict for first launch too (for consistency)
                 camoufox_options["config"] = fp_config
 
-                # Generate WebGL fingerprint
-                os_short = os_short_map.get(profile.os_type, "win")
-                webgl_fp = sample_webgl(os_short)
+                # Generate WebGL fingerprint matching the OS from profile
+                webgl_os = os_short_map.get(profile.os_type, "win")
+                webgl_fp = sample_webgl(webgl_os)
                 webgl_vendor = webgl_fp["webGl:vendor"]
                 webgl_renderer = webgl_fp["webGl:renderer"]
                 camoufox_options["webgl_config"] = (webgl_vendor, webgl_renderer)
@@ -347,7 +494,7 @@ class BrowserLauncher:
                         "spacing_seed": fonts_spacing_seed,
                     },
                     "history_length": history_length,
-                    "os": profile.os_type,
+                    "os": profile.os_type or "windows",
                 }
                 fingerprint_file.write_text(json.dumps(fp_data, indent=2, default=str))
                 logger.info(
@@ -358,19 +505,21 @@ class BrowserLauncher:
             # This is needed because Camoufox generates these inside launch_options()
             # and we need to remove them AFTER generation but BEFORE launching
             from functools import partial
-            
+
             # Extract persistent_context flag - it's handled separately by AsyncCamoufox
             persistent_context = camoufox_options.pop("persistent_context", False)
-            
+
             # Generate launch options
             from_options = await asyncio.get_event_loop().run_in_executor(
                 None,
                 partial(camoufox_launch_options, **camoufox_options),
             )
-            
+
             # Remove screen/window keys from CAMOU_CONFIG env vars for dynamic window sizing
-            from_options["env"] = _remove_screen_window_keys_from_env(from_options["env"])
-            
+            from_options["env"] = _remove_screen_window_keys_from_env(
+                from_options["env"]
+            )
+
             # Add no_viewport for Playwright - let content scale with window
             from_options["no_viewport"] = True
 

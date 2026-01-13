@@ -151,7 +151,9 @@ class MainWindow(QMainWindow):
         try:
             task = asyncio.create_task(coro)
         except RuntimeError as e:
-            logging.getLogger(__name__).warning("Cannot start task (%s): %s", context, e)
+            logging.getLogger(__name__).warning(
+                "Cannot start task (%s): %s", context, e
+            )
             return
 
         def _done(t: asyncio.Task) -> None:
@@ -377,7 +379,9 @@ class MainWindow(QMainWindow):
             ping_btn.setFixedSize(btn_size, btn_size)
             ping_btn.setProperty("class", "icon")
             ping_btn.setToolTip("Ping")
-            ping_btn.clicked.connect(lambda checked=False, p=profile: self._ping_proxy(p))
+            ping_btn.clicked.connect(
+                lambda checked=False, p=profile: self._ping_proxy(p)
+            )
             ping_btn.setEnabled(bool(profile.proxy and profile.proxy.enabled))
             actions_layout.addWidget(ping_btn)
 
@@ -617,7 +621,19 @@ class MainWindow(QMainWindow):
         """Edit profile."""
         dialog = ProfileDialog(profile, storage=self.storage, parent=self)
         if dialog.exec():
-            self.storage.update_profile(dialog.get_profile())
+            updated_profile = dialog.get_profile()
+
+            # If regenerate was requested, delete fingerprint.json
+            if dialog.should_regenerate():
+                data_dir = self.storage.get_browser_data_dir()
+                fingerprint_file = data_dir / updated_profile.id / "fingerprint.json"
+                if fingerprint_file.exists():
+                    fingerprint_file.unlink()
+                    logger.info(
+                        f"Deleted fingerprint for regeneration: {fingerprint_file}"
+                    )
+
+            self.storage.update_profile(updated_profile)
             self._refresh_table()
 
     def _move_profile_to_folder(self, profile: BrowserProfile, folder_id: str):
@@ -832,7 +848,9 @@ class MainWindow(QMainWindow):
         if not profile_ids:
             return
         # Use first profile for dialog, apply to all
-        profiles = [p for pid in profile_ids if (p := self._safe_get_profile(pid)) is not None]
+        profiles = [
+            p for pid in profile_ids if (p := self._safe_get_profile(pid)) is not None
+        ]
         if not profiles:
             return
 
@@ -849,7 +867,9 @@ class MainWindow(QMainWindow):
         """Set notes for multiple profiles."""
         if not profile_ids:
             return
-        profiles = [p for pid in profile_ids if (p := self._safe_get_profile(pid)) is not None]
+        profiles = [
+            p for pid in profile_ids if (p := self._safe_get_profile(pid)) is not None
+        ]
         if not profiles:
             return
 
@@ -891,7 +911,9 @@ class MainWindow(QMainWindow):
                 try:
                     self.storage.delete_profile(pid)
                 except (ValueError, ProfileNotFoundError, StorageError) as e:
-                    logging.getLogger(__name__).warning("Failed to delete profile %s: %s", pid, e)
+                    logging.getLogger(__name__).warning(
+                        "Failed to delete profile %s: %s", pid, e
+                    )
             self._refresh_folders()
             self._refresh_table()
             self._refresh_trash()
@@ -939,6 +961,7 @@ class MainWindow(QMainWindow):
 
     async def _do_batch_ping_proxies(self, proxies: list):
         """Perform batch proxy ping."""
+
         async def ping_one(proxy) -> None:
             ping_ms = await ping_proxy(proxy)
             proxy.ping_ms = ping_ms

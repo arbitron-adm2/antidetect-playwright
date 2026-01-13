@@ -34,6 +34,9 @@ ENV/
 *.swo
 *~
 
+# Git account switcher (contains tokens)
+git-switch-account.sh
+
 # Internal documentation and configs
 .docs/
 .github/
