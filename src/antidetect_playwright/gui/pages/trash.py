@@ -324,14 +324,14 @@ class TrashPage(QWidget):
             self._selected_rows = list(range(self.table.rowCount()))
         else:
             self._selected_rows.clear()
-        
+
         # Sync header checkbox state
         self._header_checked = checked
         if self._header_checkbox:
             self._header_checkbox.blockSignals(True)
             self._header_checkbox.setChecked(checked)
             self._header_checkbox.blockSignals(False)
-        
+
         self._update_selection()
 
     def _on_row_checkbox_toggled(self, row: int, checked: bool):

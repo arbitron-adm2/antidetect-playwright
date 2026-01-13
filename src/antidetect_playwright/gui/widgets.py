@@ -126,7 +126,11 @@ class StatusBadge(QWidget):
         }
         style = style_map.get(
             self.status,
-            {"bg": "transparent", "border": COLORS["text_muted"], "text": COLORS["text_muted"]},
+            {
+                "bg": "transparent",
+                "border": COLORS["text_muted"],
+                "text": COLORS["text_muted"],
+            },
         )
 
         label = QLabel(text)

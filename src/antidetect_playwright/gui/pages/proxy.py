@@ -135,7 +135,9 @@ class ProxyPage(QWidget):
         add_layout.addWidget(self.proxy_input)
 
         add_btn_layout = QHBoxLayout()
-        self.proxy_input.textChanged.connect(lambda: self._clear_error(self.proxy_input))
+        self.proxy_input.textChanged.connect(
+            lambda: self._clear_error(self.proxy_input)
+        )
         add_btn_layout.addStretch()
 
         add_btn = QPushButton(" Add Proxies")
@@ -336,7 +338,9 @@ class ProxyPage(QWidget):
 
         if errors:
             self._set_error(self.proxy_input, True)
-            self._alert.show_error("Parse Errors", f"{len(errors)} line(s) failed to parse.")
+            self._alert.show_error(
+                "Parse Errors", f"{len(errors)} line(s) failed to parse."
+            )
 
     def _delete_proxy(self, row: int):
         """Delete proxy at row."""
@@ -369,7 +373,9 @@ class ProxyPage(QWidget):
                     self._refresh_table()
                     self.proxy_pool_changed.emit(self.proxies)
                 if errors:
-                    self._alert.show_error("Parse Errors", f"{len(errors)} line(s) failed to parse.")
+                    self._alert.show_error(
+                        "Parse Errors", f"{len(errors)} line(s) failed to parse."
+                    )
 
     def _set_error(self, widget: QWidget, is_error: bool) -> None:
         widget.setProperty("error", "true" if is_error else "false")

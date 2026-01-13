@@ -46,6 +46,7 @@ class ProfileDialog(QDialog):
         self.profile = profile or BrowserProfile()
         self.is_new = profile is None
         self.storage = storage
+        self._regenerate_on_save = False  # Flag for fingerprint regeneration
         self._setup_ui()
         self._load_data()
 
@@ -76,9 +77,46 @@ class ProfileDialog(QDialog):
         self.os_combo = QComboBox()
         self.os_combo.addItems(["macOS", "Windows", "Linux"])
         make_combobox_searchable(self.os_combo, "Search OS")
+
+        # OS cannot be changed after profile creation (fingerprint is tied to OS)
+        if not self.is_new:
+            self.os_combo.setEnabled(False)
+            self.os_combo.setToolTip(
+                "OS cannot be changed. Use 'Regenerate Fingerprint' to change OS."
+            )
+
         name_layout.addRow("OS:", self.os_combo)
 
         layout.addWidget(name_group)
+
+        # Regenerate Fingerprint button (only for existing profiles)
+        if not self.is_new:
+            regen_group = QGroupBox("Fingerprint")
+            regen_layout = QVBoxLayout(regen_group)
+
+            regen_info = QLabel(
+                "Fingerprint is generated once and saved for consistency.\n"
+                "Regenerating will change all browser identifiers."
+            )
+            regen_info.setStyleSheet(
+                f"color: {COLORS['text_secondary']}; font-size: 11px;"
+            )
+            regen_info.setWordWrap(True)
+            regen_layout.addWidget(regen_info)
+
+            regen_btn = QPushButton("🔄 Regenerate Fingerprint")
+            regen_btn.setStyleSheet(
+                f"""
+                background-color: {COLORS['warning']};
+                color: white;
+                font-weight: 600;
+                padding: 8px 16px;
+            """
+            )
+            regen_btn.clicked.connect(self._regenerate_fingerprint)
+            regen_layout.addWidget(regen_btn)
+
+            layout.addWidget(regen_group)
 
         # Proxy
         proxy_group = QGroupBox("Proxy (Optional)")
@@ -223,6 +261,36 @@ class ProfileDialog(QDialog):
             self.profile.proxy = proxy_pool.proxies[idx]
             self._update_proxy_info()
 
+    def _regenerate_fingerprint(self):
+        """Show confirmation and mark fingerprint for regeneration."""
+        # Enable OS combo temporarily to allow selection
+        self.os_combo.setEnabled(True)
+
+        reply = QMessageBox.warning(
+            self,
+            "Regenerate Fingerprint",
+            "⚠️ This will generate a completely new fingerprint:\n\n"
+            "• New User-Agent\n"
+            "• New WebGL signature\n"
+            "• New Canvas fingerprint\n"
+            "• New hardware identifiers\n\n"
+            "The profile will appear as a different browser.\n"
+            "Select the OS for the new fingerprint and click Save.\n\n"
+            "Continue?",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.No,
+        )
+
+        if reply == QMessageBox.StandardButton.Yes:
+            # Mark for regeneration - will delete fingerprint.json on save
+            self._regenerate_on_save = True
+            self._alert.show_success(
+                "Ready", "Select OS and click Save to regenerate fingerprint"
+            )
+        else:
+            # Re-disable if cancelled
+            self.os_combo.setEnabled(False)
+
     def _save(self):
         name = self.name_input.text().strip()
         if not name:
@@ -248,6 +316,10 @@ class ProfileDialog(QDialog):
 
     def get_profile(self) -> BrowserProfile:
         return self.profile
+
+    def should_regenerate(self) -> bool:
+        """Check if fingerprint should be regenerated."""
+        return self._regenerate_on_save
 
 
 class QuickProfileDialog(QDialog):
@@ -855,6 +927,27 @@ class SettingsDialog(QDialog):
         self.start_page_input.setPlaceholderText("about:blank, https://google.com")
         browser_layout.addRow("Start page:", self.start_page_input)
 
+        # Custom browser executable path
+        browser_path_container = QHBoxLayout()
+        self.browser_path_input = QLineEdit()
+        self.browser_path_input.setPlaceholderText(
+            "Leave empty to use bundled Camoufox"
+        )
+        browser_path_browse = QPushButton("Browse...")
+        browser_path_browse.setFixedWidth(90)
+        browser_path_browse.clicked.connect(self._browse_browser_path)
+        browser_path_container.addWidget(self.browser_path_input)
+        browser_path_container.addWidget(browser_path_browse)
+        browser_path_widget = QWidget()
+        browser_path_widget.setLayout(browser_path_container)
+        browser_layout.addRow("Custom browser:", browser_path_widget)
+
+        browser_path_help = QLabel("Path to custom AntiDetect browser executable")
+        browser_path_help.setStyleSheet(
+            f"color: {COLORS['text_muted']}; font-size: 11px;"
+        )
+        browser_layout.addRow("", browser_path_help)
+
         browser_info = QLabel("Settings apply to all profiles when launching browser")
         browser_info.setWordWrap(True)
         browser_info.setStyleSheet(
@@ -1000,6 +1093,16 @@ class SettingsDialog(QDialog):
         if file_path:
             self.custom_addons_list.addItem(file_path)
 
+    def _browse_browser_path(self):
+        """Browse for custom browser executable."""
+        from PyQt6.QtWidgets import QFileDialog
+
+        file_path, _ = QFileDialog.getOpenFileName(
+            self, "Select Browser Executable", "", "Executables (*)"
+        )
+        if file_path:
+            self.browser_path_input.setText(file_path)
+
     def _remove_addon(self):
         """Remove selected addon from list."""
         current_item = self.custom_addons_list.currentItem()
@@ -1010,6 +1113,7 @@ class SettingsDialog(QDialog):
         """Load current settings into UI."""
         self.save_tabs_checkbox.setChecked(self.settings.save_tabs)
         self.start_page_input.setText(self.settings.start_page)
+        self.browser_path_input.setText(self.settings.browser_executable_path)
         self.block_images_checkbox.setChecked(self.settings.block_images)
         self.enable_cache_checkbox.setChecked(self.settings.enable_cache)
         self.humanize_spin.setValue(self.settings.humanize)
@@ -1026,6 +1130,7 @@ class SettingsDialog(QDialog):
         """Save settings and close."""
         self.settings.save_tabs = self.save_tabs_checkbox.isChecked()
         self.settings.start_page = self.start_page_input.text().strip() or "about:blank"
+        self.settings.browser_executable_path = self.browser_path_input.text().strip()
         self.settings.block_images = self.block_images_checkbox.isChecked()
         self.settings.enable_cache = self.enable_cache_checkbox.isChecked()
         self.settings.humanize = self.humanize_spin.value()

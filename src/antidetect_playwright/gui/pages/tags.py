@@ -918,14 +918,14 @@ class TagsPage(QWidget):
             self._selected_tags = list(range(self.tags_table.rowCount()))
         else:
             self._selected_tags.clear()
-        
+
         # Sync header checkbox state
         self._tags_header_checked = checked
         if hasattr(self, "_tags_header_checkbox") and self._tags_header_checkbox:
             self._tags_header_checkbox.blockSignals(True)
             self._tags_header_checkbox.setChecked(checked)
             self._tags_header_checkbox.blockSignals(False)
-        
+
         self.tags_toolbar.update_count(len(self._selected_tags))
 
     def _on_tags_header_clicked(self, section: int) -> None:
@@ -1018,14 +1018,17 @@ class TagsPage(QWidget):
             self._selected_statuses = selected
         else:
             self._selected_statuses.clear()
-        
+
         # Sync header checkbox state
         self._statuses_header_checked = checked
-        if hasattr(self, "_statuses_header_checkbox") and self._statuses_header_checkbox:
+        if (
+            hasattr(self, "_statuses_header_checkbox")
+            and self._statuses_header_checkbox
+        ):
             self._statuses_header_checkbox.blockSignals(True)
             self._statuses_header_checkbox.setChecked(checked)
             self._statuses_header_checkbox.blockSignals(False)
-        
+
         self.statuses_toolbar.update_count(len(self._selected_statuses))
 
     def _on_statuses_header_clicked(self, section: int) -> None:
@@ -1110,14 +1113,17 @@ class TagsPage(QWidget):
             self._selected_templates = list(range(self.templates_table.rowCount()))
         else:
             self._selected_templates.clear()
-        
+
         # Sync header checkbox state
         self._templates_header_checked = checked
-        if hasattr(self, "_templates_header_checkbox") and self._templates_header_checkbox:
+        if (
+            hasattr(self, "_templates_header_checkbox")
+            and self._templates_header_checkbox
+        ):
             self._templates_header_checkbox.blockSignals(True)
             self._templates_header_checkbox.setChecked(checked)
             self._templates_header_checkbox.blockSignals(False)
-        
+
         self.templates_toolbar.update_count(len(self._selected_templates))
 
     def _on_templates_header_clicked(self, section: int) -> None:
