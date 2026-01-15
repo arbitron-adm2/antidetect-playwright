@@ -45,7 +45,7 @@ class Typography:
     """Typography settings."""
 
     font_family: str = (
-        "JetBrains Mono, Fira Code, SF Mono, Consolas, Monaco, Liberation Mono, monospace"
+        "system-ui, Segoe UI, SF Pro Text, -apple-system, sans-serif"
     )
     font_size_xs: int = 10
     font_size_sm: int = 11
@@ -86,6 +86,7 @@ class Theme:
 
     # Table constants
     TABLE_ROW_HEIGHT: ClassVar[int] = 40  # Enough for 28px buttons + padding
+    TABLE_ROW_HEIGHT_COMPACT: ClassVar[int] = 32
 
     # Column width constants (min-width approach)
     COL_CHECKBOX: ClassVar[int] = 36  # Checkbox column (18px checkbox + padding)
@@ -125,14 +126,14 @@ class Theme:
         table.setStyleSheet(
             current_style
             + """
-            QTableWidget {
+            QTableWidget, QTableView {
                 gridline-color: transparent;
             }
-            QTableWidget::item {
+            QTableWidget::item, QTableView::item {
                 padding: 0px 8px;
                 margin: 0px;
             }
-            QTableWidget::item:first-child {
+            QTableWidget::item:first-child, QTableView::item:first-child {
                 padding: 0px;
             }
         """
@@ -157,6 +158,16 @@ class Theme:
             Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter
         )
         header.setFixedHeight(Theme.TABLE_ROW_HEIGHT)
+
+    @staticmethod
+    def apply_table_density(table, compact: bool) -> None:
+        """Apply compact/comfortable density to a table."""
+        height = Theme.TABLE_ROW_HEIGHT_COMPACT if compact else Theme.TABLE_ROW_HEIGHT
+        v_header = table.verticalHeader()
+        v_header.setDefaultSectionSize(height)
+        v_header.setMinimumSectionSize(height)
+        header = table.horizontalHeader()
+        header.setFixedHeight(height)
 
     @staticmethod
     def setup_table_columns(

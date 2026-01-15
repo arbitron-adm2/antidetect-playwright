@@ -8,13 +8,14 @@ from PyQt6.QtWidgets import (
     QLabel,
     QLineEdit,
     QPushButton,
-    QTableWidget,
-    QTableWidgetItem,
+    QTableView,
     QSplitter,
     QScrollArea,
     QStackedWidget,
+    QSizePolicy,
+    QGridLayout,
 )
-from PyQt6.QtCore import Qt, pyqtSignal, QSize, QEvent, QTimer
+from PyQt6.QtCore import Qt, pyqtSignal, QSize
 
 from ..theme import Theme, COLORS, TYPOGRAPHY, SPACING
 from ..icons import get_icon
@@ -31,6 +32,7 @@ from ..widgets import (
     EmptyPlaceholder,
 )
 from ..components import FloatingToolbar, CheckboxWidget, HeaderCheckbox
+from ..table_models import SimpleTableModel
 
 
 class ProfilesPage(QWidget):
@@ -45,7 +47,7 @@ class ProfilesPage(QWidget):
     tag_filter_changed = pyqtSignal(str)
     page_changed = pyqtSignal(int)
     per_page_changed = pyqtSignal(int)
-    profile_context_menu = pyqtSignal(object, object)
+    profile_context_menu = pyqtSignal(str, object)
 
     # Batch operations signals
     batch_start = pyqtSignal(list)  # List of profile IDs
@@ -61,8 +63,9 @@ class ProfilesPage(QWidget):
         self.settings = settings
         self._current_folder = ""
         self._selected_rows = []
-        self._table_area: QWidget | None = None
+        self._compact_mode = False
         self._setup_ui()
+        self._apply_responsive_columns(self.width())
 
     def _setup_ui(self):
         """Setup page UI."""
@@ -87,15 +90,12 @@ class ProfilesPage(QWidget):
 
         layout.addWidget(self.splitter)
 
-        # Install event filter on table area for toolbar positioning
-        if self._table_area:
-            self._table_area.installEventFilter(self)
 
     def _create_sidebar(self) -> QWidget:
         """Create left sidebar with folders."""
         sidebar = QFrame()
         sidebar.setObjectName("sidebar")
-        sidebar.setMinimumWidth(200)
+        sidebar.setMinimumWidth(160)
 
         layout = QVBoxLayout(sidebar)
         layout.setContentsMargins(0, SPACING.lg, 0, SPACING.lg)
@@ -168,13 +168,13 @@ class ProfilesPage(QWidget):
         header = self._create_header()
         layout.addWidget(header)
 
-        # Table area with floating toolbar overlay
+        # Table area with footer toolbar
         table_area = QWidget()
-        table_area_layout = QVBoxLayout(table_area)
+        table_area_layout = QGridLayout(table_area)
         table_area_layout.setContentsMargins(0, 0, 0, 0)
         table_area_layout.setSpacing(0)
 
-        # Container for table + overlay toolbar
+        # Container for table
         table_container_widget = QWidget()
         table_container_widget.setObjectName("tableContainerWidget")
         table_layout = QVBoxLayout(table_container_widget)
@@ -196,7 +196,7 @@ class ProfilesPage(QWidget):
         self._header_checkbox.raise_()
         self._header_checkbox.show()
 
-        # Reposition on scroll/resize
+        # Reposition on column resize
         self.table.horizontalHeader().sectionResized.connect(
             lambda: self._position_header_checkbox()
         )
@@ -207,23 +207,32 @@ class ProfilesPage(QWidget):
         self.content_stack.addWidget(self.empty_placeholder)
 
         table_layout.addWidget(self.content_stack, 1)
-        table_area_layout.addWidget(table_container_widget, 1)
+        table_area_layout.addWidget(table_container_widget, 0, 0)
 
-        # Floating toolbar (overlay at bottom center)
+        # Floating toolbar container (overlay, centered)
+        toolbar_container = QWidget()
+        toolbar_container.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents, False)
+        toolbar_layout = QHBoxLayout(toolbar_container)
+        toolbar_layout.setContentsMargins(0, 0, 0, SPACING.md)
+        toolbar_layout.setSpacing(0)
+        toolbar_layout.setAlignment(Qt.AlignmentFlag.AlignHCenter)
+
         self.floating_toolbar = FloatingToolbar("profiles")
-        self.floating_toolbar.setParent(table_area)
         self.floating_toolbar.start_clicked.connect(self._on_batch_start)
         self.floating_toolbar.stop_clicked.connect(self._on_batch_stop)
         self.floating_toolbar.tag_clicked.connect(self._on_batch_tag)
         self.floating_toolbar.notes_clicked.connect(self._on_batch_notes)
         self.floating_toolbar.ping_clicked.connect(self._on_batch_ping)
         self.floating_toolbar.delete_clicked.connect(self._on_batch_delete)
-        self.floating_toolbar.visibility_changed.connect(
-            lambda visible: self._position_toolbar() if visible else None
-        )
+        toolbar_layout.addWidget(self.floating_toolbar)
 
-        # Store reference to table_area for resizeEvent
-        self._table_area = table_area
+        table_area_layout.addWidget(
+            toolbar_container,
+            0,
+            0,
+            alignment=Qt.AlignmentFlag.AlignHCenter
+            | Qt.AlignmentFlag.AlignBottom,
+        )
 
         layout.addWidget(table_area, 1)
 
@@ -253,7 +262,10 @@ class ProfilesPage(QWidget):
         # Search
         self.search_input = QLineEdit()
         self.search_input.setPlaceholderText("Search")
-        self.search_input.setFixedWidth(180)
+        self.search_input.setMinimumWidth(180)
+        self.search_input.setSizePolicy(
+            QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed
+        )
         self.search_input.textChanged.connect(self.search_changed.emit)
         layout.addWidget(self.search_input)
 
@@ -275,13 +287,13 @@ class ProfilesPage(QWidget):
 
         return header
 
-    def _create_table(self) -> QTableWidget:
+    def _create_table(self) -> QTableView:
         """Create profiles table with checkbox column."""
-        table = QTableWidget()
-        table.setColumnCount(7)  # Checkbox + 6 columns
-        table.setHorizontalHeaderLabels(
-            ["", "Name", "Status", "Notes", "Tags", "Proxy", "Actions"]
-        )
+        table = QTableView()
+
+        headers = ["", "Name", "Status", "Notes", "Tags", "Proxy", "Actions"]
+        self.table_model = SimpleTableModel(headers, self)
+        table.setModel(self.table_model)
 
         # Unified table styling first
         Theme.setup_table(table)
@@ -305,7 +317,6 @@ class ProfilesPage(QWidget):
         self._header_checkbox.toggled.connect(self._on_header_checkbox_toggled)
 
         # Position header checkbox in first column header
-        # We need to use a custom approach since QHeaderView doesn't support widgets directly
         table.horizontalHeader().sectionClicked.connect(self._on_header_section_clicked)
 
         # Track header checkbox state
@@ -316,6 +327,54 @@ class ProfilesPage(QWidget):
         table.customContextMenuRequested.connect(self._on_context_menu)
 
         return table
+
+    def resizeEvent(self, event):
+        """Handle resize for responsive columns."""
+        super().resizeEvent(event)
+        self._apply_responsive_columns(event.size().width())
+
+    def is_compact_mode(self) -> bool:
+        """Return whether compact mode is active."""
+        return self._compact_mode
+
+    def _apply_responsive_columns(self, width: int) -> None:
+        """Show/hide columns based on available width."""
+        compact = width < 1100
+        if compact == self._compact_mode:
+            return
+
+        self._compact_mode = compact
+
+        hidden_columns = [3, 4, 5]  # Notes, Tags, Proxy
+        for col in hidden_columns:
+            self.table.setColumnHidden(col, compact)
+
+        from PyQt6.QtWidgets import QHeaderView
+
+        header = self.table.horizontalHeader()
+        if compact:
+            header.setSectionResizeMode(0, QHeaderView.ResizeMode.Fixed)
+            self.table.setColumnWidth(0, Theme.COL_CHECKBOX)
+            header.setSectionResizeMode(1, QHeaderView.ResizeMode.Stretch)
+            header.setSectionResizeMode(2, QHeaderView.ResizeMode.Fixed)
+            self.table.setColumnWidth(2, Theme.COL_STATUS)
+            header.setSectionResizeMode(6, QHeaderView.ResizeMode.Fixed)
+            self.table.setColumnWidth(6, Theme.COL_ACTIONS_MD)
+        else:
+            Theme.setup_table_columns(
+                self.table,
+                [
+                    (0, "fixed", Theme.COL_CHECKBOX),
+                    (1, "stretch", None),
+                    (2, "fixed", Theme.COL_STATUS),
+                    (3, "stretch", None),
+                    (4, "stretch", None),
+                    (5, "stretch", None),
+                    (6, "fixed", Theme.COL_ACTIONS_MD),
+                ],
+            )
+
+        self._position_header_checkbox()
 
     def _create_footer(self) -> QWidget:
         """Create footer with tags and pagination."""
@@ -348,12 +407,13 @@ class ProfilesPage(QWidget):
 
     def _on_context_menu(self, pos):
         """Forward context menu request."""
-        row = self.table.rowAt(pos.y())
+        index = self.table.indexAt(pos)
+        row = index.row()
         if row < 0:
             return
-        item = self.table.item(row, 1)
-        if item:
-            self.profile_context_menu.emit(item, self.table.mapToGlobal(pos))
+        profile_id = self.table_model.payload_at(row)
+        if profile_id:
+            self.profile_context_menu.emit(profile_id, self.table.mapToGlobal(pos))
 
     def set_folder_label(self, text: str):
         """Update folder label text."""
@@ -408,9 +468,9 @@ class ProfilesPage(QWidget):
         checkbox.customContextMenuRequested.connect(
             lambda pos, r=row, w=checkbox: (
                 self.profile_context_menu.emit(
-                    self.table.item(r, 1), w.mapToGlobal(pos)
+                    self.table_model.payload_at(r), w.mapToGlobal(pos)
                 )
-                if self.table.item(r, 1)
+                if self.table_model.payload_at(r)
                 else None
             )
         )
@@ -421,7 +481,8 @@ class ProfilesPage(QWidget):
             checkbox.blockSignals(True)
             checkbox.setChecked(True)
             checkbox.blockSignals(False)
-        self.table.setCellWidget(row, 0, checkbox)
+        index = self.table_model.index(row, 0)
+        self.table.setIndexWidget(index, checkbox)
 
     def _on_header_section_clicked(self, section: int):
         """Handle header section click - toggle select all for column 0."""
@@ -432,8 +493,8 @@ class ProfilesPage(QWidget):
     def _on_header_checkbox_toggled(self, checked: bool):
         """Handle header (select all) checkbox toggle."""
         self._header_checked = checked
-        for row in range(self.table.rowCount()):
-            widget = self.table.cellWidget(row, 0)
+        for row in range(self.table_model.rowCount()):
+            widget = self.table.indexWidget(self.table_model.index(row, 0))
             if isinstance(widget, CheckboxWidget):
                 widget.blockSignals(True)
                 widget.setChecked(checked)
@@ -447,7 +508,7 @@ class ProfilesPage(QWidget):
 
     def _update_header_checkbox_state(self):
         """Update header checkbox state based on row selections."""
-        total = self.table.rowCount()
+        total = self.table_model.rowCount()
         if total == 0:
             self._header_checked = False
             if self._header_checkbox:
@@ -470,10 +531,11 @@ class ProfilesPage(QWidget):
     def _update_selection(self):
         """Update selected rows and toolbar."""
         selected = []
-        for row in range(self.table.rowCount()):
-            widget = self.table.cellWidget(row, 0)
+        for row in range(self.table_model.rowCount()):
+            widget = self.table.indexWidget(self.table_model.index(row, 0))
             if isinstance(widget, CheckboxWidget) and widget.isChecked():
                 selected.append(row)
+
 
         self._selected_rows = selected
         self.floating_toolbar.update_count(len(selected))
@@ -483,17 +545,15 @@ class ProfilesPage(QWidget):
         """Get list of selected profile IDs."""
         ids = []
         for row in self._selected_rows:
-            item = self.table.item(row, 1)  # Name column stores ID
-            if item:
-                profile_id = item.data(Qt.ItemDataRole.UserRole)
-                if profile_id:
-                    ids.append(profile_id)
+            profile_id = self.table_model.payload_at(row)
+            if profile_id:
+                ids.append(profile_id)
         return ids
 
     def _deselect_all(self):
         """Deselect all checkboxes and reset header checkbox."""
-        for row in range(self.table.rowCount()):
-            widget = self.table.cellWidget(row, 0)
+        for row in range(self.table_model.rowCount()):
+            widget = self.table.indexWidget(self.table_model.index(row, 0))
             if isinstance(widget, CheckboxWidget):
                 widget.blockSignals(True)
                 widget.setChecked(False)
@@ -541,30 +601,3 @@ class ProfilesPage(QWidget):
             return
         Theme.position_header_checkbox(self.table, self._header_checkbox)
 
-    # === Toolbar positioning ===
-
-    def eventFilter(self, obj, event):
-        """Handle events for toolbar positioning."""
-        if obj == self._table_area and event.type() == QEvent.Type.Resize:
-            self._position_toolbar()
-        return super().eventFilter(obj, event)
-
-    def _position_toolbar(self):
-        """Position floating toolbar at bottom center of table area."""
-        self._do_position_toolbar()
-
-    def _do_position_toolbar(self):
-        """Actually position the toolbar."""
-        if not self._table_area or not self.floating_toolbar:
-            return
-
-        self.floating_toolbar.adjustSize()
-        toolbar_width = self.floating_toolbar.width()
-        toolbar_height = self.floating_toolbar.height()
-        area_width = self._table_area.width()
-        area_height = self._table_area.height()
-
-        x = (area_width - toolbar_width) // 2
-        y = area_height - toolbar_height - SPACING.lg
-
-        self.floating_toolbar.setGeometry(x, y, toolbar_width, toolbar_height)

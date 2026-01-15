@@ -7,17 +7,15 @@ from PyQt6.QtWidgets import (
     QFrame,
     QLabel,
     QPushButton,
-    QTableWidget,
-    QTableWidgetItem,
+    QTableView,
     QLineEdit,
     QTextEdit,
     QComboBox,
     QTabWidget,
-    QMessageBox,
-    QInputDialog,
     QMenu,
+    QGridLayout,
 )
-from PyQt6.QtCore import Qt, pyqtSignal, QSize, QEvent, QTimer
+from PyQt6.QtCore import Qt, pyqtSignal, QSize
 
 from ..theme import Theme, COLORS, TYPOGRAPHY, SPACING
 from ..icons import get_icon
@@ -30,6 +28,8 @@ from ..components import (
     make_combobox_searchable,
 )
 from ..dialogs import StatusEditDialog
+from ..modal import exec_modal, confirm_dialog, get_text_dialog
+from ..table_models import SimpleTableModel
 
 
 class TagsPage(QWidget):
@@ -60,14 +60,11 @@ class TagsPage(QWidget):
         self._selected_tags: list[int] = []
         self._selected_statuses: list[int] = []
         self._selected_templates: list[int] = []
-
-        # Table areas for toolbar positioning
-        self._tags_table_area: QWidget | None = None
-        self._statuses_table_area: QWidget | None = None
-        self._templates_table_area: QWidget | None = None
+        self._compact_mode = False
 
         self._setup_ui()
         self._refresh_statuses_table()
+        self._apply_responsive_columns(self.width())
 
     def _setup_ui(self):
         """Setup page UI."""
@@ -108,6 +105,90 @@ class TagsPage(QWidget):
 
         layout.addWidget(self.tabs, 1)
 
+    def resizeEvent(self, event):
+        """Handle resize for responsive columns."""
+        super().resizeEvent(event)
+        self._apply_responsive_columns(event.size().width())
+
+    def _apply_responsive_columns(self, width: int) -> None:
+        """Show/hide columns based on available width."""
+        compact = width < 1000
+        if compact == self._compact_mode:
+            return
+
+        self._compact_mode = compact
+
+        self.tags_table.setColumnHidden(2, compact)
+        self.statuses_table.setColumnHidden(2, compact)
+        self.templates_table.setColumnHidden(2, compact)
+
+        from PyQt6.QtWidgets import QHeaderView
+
+        if compact:
+            self.tags_table.horizontalHeader().setSectionResizeMode(
+                0, QHeaderView.ResizeMode.Fixed
+            )
+            self.tags_table.setColumnWidth(0, Theme.COL_CHECKBOX)
+            self.tags_table.horizontalHeader().setSectionResizeMode(
+                1, QHeaderView.ResizeMode.Stretch
+            )
+            self.tags_table.horizontalHeader().setSectionResizeMode(
+                3, QHeaderView.ResizeMode.Fixed
+            )
+            self.tags_table.setColumnWidth(3, Theme.COL_ACTIONS_MD)
+
+            self.statuses_table.horizontalHeader().setSectionResizeMode(
+                0, QHeaderView.ResizeMode.Fixed
+            )
+            self.statuses_table.setColumnWidth(0, Theme.COL_CHECKBOX)
+            self.statuses_table.horizontalHeader().setSectionResizeMode(
+                1, QHeaderView.ResizeMode.Stretch
+            )
+            self.statuses_table.horizontalHeader().setSectionResizeMode(
+                3, QHeaderView.ResizeMode.Fixed
+            )
+            self.statuses_table.setColumnWidth(3, Theme.COL_ACTIONS_MD)
+
+            self.templates_table.horizontalHeader().setSectionResizeMode(
+                0, QHeaderView.ResizeMode.Fixed
+            )
+            self.templates_table.setColumnWidth(0, Theme.COL_CHECKBOX)
+            self.templates_table.horizontalHeader().setSectionResizeMode(
+                1, QHeaderView.ResizeMode.Stretch
+            )
+            self.templates_table.horizontalHeader().setSectionResizeMode(
+                3, QHeaderView.ResizeMode.Fixed
+            )
+            self.templates_table.setColumnWidth(3, Theme.COL_ACTIONS_MD)
+        else:
+            Theme.setup_table_columns(
+                self.tags_table,
+                [
+                    (0, "fixed", Theme.COL_CHECKBOX),
+                    (1, "stretch", None),
+                    (2, "fixed", 80),
+                    (3, "fixed", Theme.COL_ACTIONS_MD),
+                ],
+            )
+            Theme.setup_table_columns(
+                self.statuses_table,
+                [
+                    (0, "fixed", Theme.COL_CHECKBOX),
+                    (1, "stretch", None),
+                    (2, "fixed", Theme.COL_STATUS),
+                    (3, "fixed", Theme.COL_ACTIONS_MD),
+                ],
+            )
+            Theme.setup_table_columns(
+                self.templates_table,
+                [
+                    (0, "fixed", Theme.COL_CHECKBOX),
+                    (1, "stretch", None),
+                    (2, "stretch", None),
+                    (3, "fixed", Theme.COL_ACTIONS_MD),
+                ],
+            )
+
     def _create_tags_tab(self) -> QWidget:
         """Create tags management tab."""
         widget = QWidget()
@@ -135,16 +216,17 @@ class TagsPage(QWidget):
 
         # Table area with overlay toolbar
         table_area = QWidget()
-        table_area_layout = QVBoxLayout(table_area)
+        table_area_layout = QGridLayout(table_area)
         table_area_layout.setContentsMargins(0, 0, 0, 0)
         table_area_layout.setSpacing(0)
 
         # Tags table with checkbox column
-        self.tags_table = QTableWidget()
-        self.tags_table.setColumnCount(4)  # Checkbox + 3
-        self.tags_table.setHorizontalHeaderLabels(
-            ["", "Tag Name", "Profiles", "Actions"]
+        self.tags_table = QTableView()
+        self.tags_table_model = SimpleTableModel(
+            ["", "Tag Name", "Profiles", "Actions"], self
         )
+        self.tags_table_model.set_alignments({2: Qt.AlignmentFlag.AlignCenter})
+        self.tags_table.setModel(self.tags_table_model)
 
         # Unified table styling first
         Theme.setup_table(self.tags_table)
@@ -168,7 +250,7 @@ class TagsPage(QWidget):
 
         # Wrap in container with rounded corners
         table_container = Theme.create_table_container(self.tags_table)
-        table_area_layout.addWidget(table_container, 1)
+        table_area_layout.addWidget(table_container, 0, 0)
 
         # Header checkbox overlay (positioned over first header column)
         self._tags_header_checkbox = HeaderCheckbox()
@@ -186,21 +268,27 @@ class TagsPage(QWidget):
             lambda: self._position_tags_header_checkbox()
         )
 
-        # Floating toolbar (overlay at bottom center)
+        # Floating toolbar container
+        toolbar_container = QWidget()
+        toolbar_layout = QHBoxLayout(toolbar_container)
+        toolbar_layout.setContentsMargins(0, 0, 0, SPACING.md)
+        toolbar_layout.setSpacing(0)
+        toolbar_layout.setAlignment(Qt.AlignmentFlag.AlignHCenter)
+
         self.tags_toolbar = FloatingToolbar("tags")
-        self.tags_toolbar.setParent(table_area)
         self.tags_toolbar.delete_clicked.connect(self._on_batch_delete_tags)
-        self.tags_toolbar.visibility_changed.connect(
-            lambda visible: self._position_tags_toolbar() if visible else None
+        toolbar_layout.addWidget(self.tags_toolbar)
+        table_area_layout.addWidget(
+            toolbar_container,
+            0,
+            0,
+            alignment=Qt.AlignmentFlag.AlignHCenter
+            | Qt.AlignmentFlag.AlignBottom,
         )
 
         # Context menu
         self.tags_table.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         self.tags_table.customContextMenuRequested.connect(self._on_tags_context_menu)
-
-        # Store reference for positioning
-        self._tags_table_area = table_area
-        table_area.installEventFilter(self)
 
         layout.addWidget(table_area, 1)
 
@@ -237,16 +325,17 @@ class TagsPage(QWidget):
 
         # Table area with overlay toolbar
         table_area = QWidget()
-        table_area_layout = QVBoxLayout(table_area)
+        table_area_layout = QGridLayout(table_area)
         table_area_layout.setContentsMargins(0, 0, 0, 0)
         table_area_layout.setSpacing(0)
 
         # Statuses table with checkbox column
-        self.statuses_table = QTableWidget()
-        self.statuses_table.setColumnCount(4)  # Checkbox + 3
-        self.statuses_table.setHorizontalHeaderLabels(
-            ["", "Status Name", "Color", "Actions"]
+        self.statuses_table = QTableView()
+        self.statuses_table_model = SimpleTableModel(
+            ["", "Status Name", "Color", "Actions"], self
         )
+        self.statuses_table_model.set_alignments({2: Qt.AlignmentFlag.AlignCenter})
+        self.statuses_table.setModel(self.statuses_table_model)
 
         # Unified table styling first
         Theme.setup_table(self.statuses_table)
@@ -276,7 +365,7 @@ class TagsPage(QWidget):
 
         # Wrap in container with rounded corners
         table_container = Theme.create_table_container(self.statuses_table)
-        table_area_layout.addWidget(table_container, 1)
+        table_area_layout.addWidget(table_container, 0, 0)
 
         # Header checkbox overlay (positioned over first header column)
         self._statuses_header_checkbox = HeaderCheckbox()
@@ -294,17 +383,23 @@ class TagsPage(QWidget):
             lambda: self._position_statuses_header_checkbox()
         )
 
-        # Floating toolbar (overlay at bottom center)
-        self.statuses_toolbar = FloatingToolbar("tags")
-        self.statuses_toolbar.setParent(table_area)
-        self.statuses_toolbar.delete_clicked.connect(self._on_batch_delete_statuses)
-        self.statuses_toolbar.visibility_changed.connect(
-            lambda visible: self._position_statuses_toolbar() if visible else None
-        )
+        # Floating toolbar container
+        toolbar_container = QWidget()
+        toolbar_layout = QHBoxLayout(toolbar_container)
+        toolbar_layout.setContentsMargins(0, 0, 0, SPACING.md)
+        toolbar_layout.setSpacing(0)
+        toolbar_layout.setAlignment(Qt.AlignmentFlag.AlignHCenter)
 
-        # Store reference for positioning
-        self._statuses_table_area = table_area
-        table_area.installEventFilter(self)
+        self.statuses_toolbar = FloatingToolbar("tags")
+        self.statuses_toolbar.delete_clicked.connect(self._on_batch_delete_statuses)
+        toolbar_layout.addWidget(self.statuses_toolbar)
+        table_area_layout.addWidget(
+            toolbar_container,
+            0,
+            0,
+            alignment=Qt.AlignmentFlag.AlignHCenter
+            | Qt.AlignmentFlag.AlignBottom,
+        )
 
         layout.addWidget(table_area, 1)
 
@@ -362,16 +457,32 @@ class TagsPage(QWidget):
 
         # Table area with overlay toolbar
         table_area = QWidget()
-        table_area_layout = QVBoxLayout(table_area)
+        table_area_layout = QGridLayout(table_area)
         table_area_layout.setContentsMargins(0, 0, 0, 0)
         table_area_layout.setSpacing(0)
 
         # Templates table with checkbox column
-        self.templates_table = QTableWidget()
-        self.templates_table.setColumnCount(4)  # Checkbox + 3
-        self.templates_table.setHorizontalHeaderLabels(
-            ["", "Template Name", "Preview", "Actions"]
+        self.templates_table = QTableView()
+        self.templates_table_model = SimpleTableModel(
+            ["", "Template Name", "Preview", "Actions"], self
         )
+        self.templates_table.setModel(self.templates_table_model)
+
+        # Unified table styling first
+        Theme.setup_table(self.templates_table)
+
+        # Configure columns with proper sizing
+        Theme.setup_table_columns(
+            self.templates_table,
+            [
+                (0, "fixed", Theme.COL_CHECKBOX),  # Checkbox
+                (1, "stretch", None),  # Name - fills space
+                (2, "stretch", None),  # Preview - fills space
+                (3, "fixed", Theme.COL_ACTIONS_MD),  # Actions
+            ],
+        )
+
+
 
         # Unified table styling first
         Theme.setup_table(self.templates_table)
@@ -395,7 +506,7 @@ class TagsPage(QWidget):
 
         # Wrap in container with rounded corners
         table_container = Theme.create_table_container(self.templates_table)
-        table_area_layout.addWidget(table_container, 1)
+        table_area_layout.addWidget(table_container, 0, 0)
 
         # Header checkbox overlay (positioned over first header column)
         self._templates_header_checkbox = HeaderCheckbox()
@@ -413,12 +524,22 @@ class TagsPage(QWidget):
             lambda: self._position_templates_header_checkbox()
         )
 
-        # Floating toolbar (overlay at bottom center)
+        # Floating toolbar container
+        toolbar_container = QWidget()
+        toolbar_layout = QHBoxLayout(toolbar_container)
+        toolbar_layout.setContentsMargins(0, 0, 0, SPACING.md)
+        toolbar_layout.setSpacing(0)
+        toolbar_layout.setAlignment(Qt.AlignmentFlag.AlignHCenter)
+
         self.templates_toolbar = FloatingToolbar("tags")
-        self.templates_toolbar.setParent(table_area)
         self.templates_toolbar.delete_clicked.connect(self._on_batch_delete_templates)
-        self.templates_toolbar.visibility_changed.connect(
-            lambda visible: self._position_templates_toolbar() if visible else None
+        toolbar_layout.addWidget(self.templates_toolbar)
+        table_area_layout.addWidget(
+            toolbar_container,
+            0,
+            0,
+            alignment=Qt.AlignmentFlag.AlignHCenter
+            | Qt.AlignmentFlag.AlignBottom,
         )
 
         # Context menu
@@ -428,10 +549,6 @@ class TagsPage(QWidget):
         self.templates_table.customContextMenuRequested.connect(
             self._on_templates_context_menu
         )
-
-        # Store reference for positioning
-        self._templates_table_area = table_area
-        table_area.installEventFilter(self)
 
         layout.addWidget(table_area, 1)
 
@@ -444,25 +561,20 @@ class TagsPage(QWidget):
         self.tags_toolbar.update_count(0)
         tag_counts = tag_counts or {}
 
-        self.tags_table.setRowCount(len(self.tags))
+        rows: list[list[str]] = []
+        for tag in self.tags:
+            count = tag_counts.get(tag, 0)
+            rows.append(["", tag, str(count), ""])
+
+        self.tags_table_model.set_rows(rows, list(self.tags))
 
         for row, tag in enumerate(self.tags):
             # Checkbox
             self._add_checkbox_to_tags_table(row)
 
-            # Name
-            name_item = QTableWidgetItem(tag)
-            self.tags_table.setItem(row, 1, name_item)
-
-            # Count
-            count = tag_counts.get(tag, 0)
-            count_item = QTableWidgetItem(str(count))
-            count_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
-            self.tags_table.setItem(row, 2, count_item)
-
             # Actions
             actions = self._create_tag_actions(row, tag)
-            self.tags_table.setCellWidget(row, 3, actions)
+            self.tags_table.setIndexWidget(self.tags_table_model.index(row, 3), actions)
 
     def update_statuses(self, statuses: list[tuple[str, str]]):
         """Update statuses table."""
@@ -521,11 +633,13 @@ class TagsPage(QWidget):
         del_btn.clicked.connect(lambda: self._delete_tag(tag))
         layout.addWidget(del_btn)
 
+
         layout.addStretch()
         return widget
 
     def _on_tags_context_menu(self, pos):
-        row = self.tags_table.rowAt(pos.y())
+        index = self.tags_table.indexAt(pos)
+        row = index.row()
         if row < 0 or row >= len(self.tags):
             return
         tag = self.tags[row]
@@ -556,9 +670,7 @@ class TagsPage(QWidget):
 
     def _rename_tag(self, old_name: str):
         """Rename tag."""
-        new_name, ok = QInputDialog.getText(
-            self, "Rename Tag", "New name:", text=old_name
-        )
+        new_name, ok = get_text_dialog(self, "Rename Tag", "New name:", old_name)
         if ok and new_name and new_name != old_name:
             if new_name in self.tags:
                 self._alert.show_error("Duplicate", f"Tag '{new_name}' already exists.")
@@ -579,13 +691,8 @@ class TagsPage(QWidget):
 
     def _delete_tag(self, tag: str):
         """Delete tag."""
-        reply = QMessageBox.question(
-            self,
-            "Delete Tag",
-            f"Delete tag '{tag}'? It will be removed from all profiles.",
-            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
-        )
-        if reply == QMessageBox.StandardButton.Yes:
+        if confirm_dialog(self, "Delete Tag", f"Delete tag '{tag}'?"):
+
             self.tags.remove(tag)
             self.update_tags(self.tags)
             self.tag_deleted.emit(tag)
@@ -614,15 +721,15 @@ class TagsPage(QWidget):
             ("Error", "red"),
         ] + self.statuses
 
-        self.statuses_table.setRowCount(len(all_statuses))
+        rows: list[list[str]] = []
+        for name, color in all_statuses:
+            rows.append(["", name, color.capitalize(), ""])
+
+        self.statuses_table_model.set_rows(rows, list(all_statuses))
 
         for row, (name, color) in enumerate(all_statuses):
             # Checkbox (disabled for default statuses)
             self._add_checkbox_to_statuses_table(row, enabled=(row >= 3))
-
-            # Name
-            name_item = QTableWidgetItem(name)
-            self.statuses_table.setItem(row, 1, name_item)
 
             # Color badge
             color_label = QLabel(color.capitalize())
@@ -638,14 +745,18 @@ class TagsPage(QWidget):
                 f"background: {bg}; color: white; padding: 2px 8px; border-radius: 4px;"
             )
             color_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-            self.statuses_table.setCellWidget(row, 2, color_label)
+            self.statuses_table.setIndexWidget(
+                self.statuses_table_model.index(row, 2), color_label
+            )
 
             # Actions (only for custom statuses)
             if row >= 3:
                 actions = self._create_status_actions(row - 3)
-                self.statuses_table.setCellWidget(row, 3, actions)
             else:
-                self.statuses_table.setCellWidget(row, 3, QWidget())
+                actions = QWidget()
+            self.statuses_table.setIndexWidget(
+                self.statuses_table_model.index(row, 3), actions
+            )
 
     def _create_status_actions(self, idx: int) -> QWidget:
         """Create actions for custom status."""
@@ -696,7 +807,8 @@ class TagsPage(QWidget):
         return widget
 
     def _on_statuses_context_menu(self, pos):
-        row = self.statuses_table.rowAt(pos.y())
+        index = self.statuses_table.indexAt(pos)
+        row = index.row()
         if row < 3:
             return
         idx = row - 3
@@ -717,7 +829,7 @@ class TagsPage(QWidget):
         if 0 <= idx < len(self.statuses):
             name, color = self.statuses[idx]
             dialog = StatusEditDialog(name, color, self)
-            if dialog.exec():
+            if exec_modal(self, dialog):
                 new_name, new_color = dialog.get_values()
                 if new_name:
                     old_name = name
@@ -729,6 +841,8 @@ class TagsPage(QWidget):
         """Delete custom status."""
         if 0 <= idx < len(self.statuses):
             name, _ = self.statuses[idx]
+            if not confirm_dialog(self, "Delete Status", f"Delete status '{name}'?"):
+                return
             del self.statuses[idx]
             self._refresh_statuses_table()
             if name:
@@ -752,25 +866,23 @@ class TagsPage(QWidget):
         self._selected_templates.clear()
         self.templates_toolbar.update_count(0)
 
-        self.templates_table.setRowCount(len(self.note_templates))
+        rows: list[list[str]] = []
+        for name, content in self.note_templates:
+            preview = content[:50] + "..." if len(content) > 50 else content
+            preview = preview.replace("\n", " ")
+            rows.append(["", name, preview, ""])
 
-        for row, (name, content) in enumerate(self.note_templates):
+        self.templates_table_model.set_rows(rows, list(self.note_templates))
+
+        for row in range(len(self.note_templates)):
             # Checkbox
             self._add_checkbox_to_templates_table(row)
 
-            # Name
-            name_item = QTableWidgetItem(name)
-            self.templates_table.setItem(row, 1, name_item)
-
-            # Preview
-            preview = content[:50] + "..." if len(content) > 50 else content
-            preview = preview.replace("\n", " ")
-            preview_item = QTableWidgetItem(preview)
-            self.templates_table.setItem(row, 2, preview_item)
-
             # Actions
             actions = self._create_template_actions(row)
-            self.templates_table.setCellWidget(row, 3, actions)
+            self.templates_table.setIndexWidget(
+                self.templates_table_model.index(row, 3), actions
+            )
 
     def _create_template_actions(self, idx: int) -> QWidget:
         """Create actions for template."""
@@ -819,11 +931,15 @@ class TagsPage(QWidget):
         del_btn.clicked.connect(lambda: self._delete_template(idx))
         layout.addWidget(del_btn)
 
+
+
+
         layout.addStretch()
         return widget
 
     def _on_templates_context_menu(self, pos):
-        row = self.templates_table.rowAt(pos.y())
+        index = self.templates_table.indexAt(pos)
+        row = index.row()
         if row < 0 or row >= len(self.note_templates):
             return
         self._show_template_context_menu(row, self.templates_table.mapToGlobal(pos))
@@ -851,6 +967,8 @@ class TagsPage(QWidget):
         """Delete template."""
         if 0 <= idx < len(self.note_templates):
             name, _ = self.note_templates[idx]
+            if not confirm_dialog(self, "Delete Template", f"Delete template '{name}'?"):
+                return
             del self.note_templates[idx]
             self._refresh_templates_table()
             if name:
@@ -876,7 +994,7 @@ class TagsPage(QWidget):
         checkbox.toggled.connect(
             lambda checked, r=row: self._on_tag_checkbox_toggled(r, checked)
         )
-        self.tags_table.setCellWidget(row, 0, checkbox)
+        self.tags_table.setIndexWidget(self.tags_table_model.index(row, 0), checkbox)
 
     def _on_tag_checkbox_toggled(self, row: int, checked: bool) -> None:
         """Handle tag row checkbox toggle."""
@@ -891,7 +1009,7 @@ class TagsPage(QWidget):
 
     def _update_tags_header_state(self) -> None:
         """Update header checkbox state based on selections."""
-        total = self.tags_table.rowCount()
+        total = self.tags_table_model.rowCount()
         if total > 0 and len(self._selected_tags) == total:
             self._tags_header_checked = True
         else:
@@ -908,14 +1026,14 @@ class TagsPage(QWidget):
 
     def _toggle_all_tags(self, checked: bool) -> None:
         """Toggle all tag checkboxes and sync header."""
-        for row in range(self.tags_table.rowCount()):
-            widget = self.tags_table.cellWidget(row, 0)
+        for row in range(self.tags_table_model.rowCount()):
+            widget = self.tags_table.indexWidget(self.tags_table_model.index(row, 0))
             if isinstance(widget, CheckboxWidget):
                 widget.blockSignals(True)
                 widget.setChecked(checked)
                 widget.blockSignals(False)
         if checked:
-            self._selected_tags = list(range(self.tags_table.rowCount()))
+            self._selected_tags = list(range(self.tags_table_model.rowCount()))
         else:
             self._selected_tags.clear()
 
@@ -964,7 +1082,9 @@ class TagsPage(QWidget):
         checkbox.toggled.connect(
             lambda checked, r=row: self._on_status_checkbox_toggled(r, checked)
         )
-        self.statuses_table.setCellWidget(row, 0, checkbox)
+        self.statuses_table.setIndexWidget(
+            self.statuses_table_model.index(row, 0), checkbox
+        )
 
     def _on_status_checkbox_toggled(self, row: int, checked: bool) -> None:
         """Handle status row checkbox toggle."""
@@ -980,12 +1100,13 @@ class TagsPage(QWidget):
     def _update_statuses_header_state(self) -> None:
         """Update header checkbox state based on selections."""
         # Count only enabled (custom) rows
-        enabled_count = sum(
-            1
-            for row in range(self.statuses_table.rowCount())
-            if isinstance(self.statuses_table.cellWidget(row, 0), CheckboxWidget)
-            and self.statuses_table.cellWidget(row, 0).isEnabled()
-        )
+        enabled_count = 0
+        for row in range(self.statuses_table_model.rowCount()):
+            widget = self.statuses_table.indexWidget(
+                self.statuses_table_model.index(row, 0)
+            )
+            if isinstance(widget, CheckboxWidget) and widget.isEnabled():
+                enabled_count += 1
         if enabled_count > 0 and len(self._selected_statuses) == enabled_count:
             self._statuses_header_checked = True
         else:
@@ -1006,8 +1127,10 @@ class TagsPage(QWidget):
     def _toggle_all_statuses(self, checked: bool) -> None:
         """Toggle all status checkboxes (only enabled ones) and sync header."""
         selected = []
-        for row in range(self.statuses_table.rowCount()):
-            widget = self.statuses_table.cellWidget(row, 0)
+        for row in range(self.statuses_table_model.rowCount()):
+            widget = self.statuses_table.indexWidget(
+                self.statuses_table_model.index(row, 0)
+            )
             if isinstance(widget, CheckboxWidget) and widget.isEnabled():
                 widget.blockSignals(True)
                 widget.setChecked(checked)
@@ -1068,7 +1191,9 @@ class TagsPage(QWidget):
         checkbox.toggled.connect(
             lambda checked, r=row: self._on_template_checkbox_toggled(r, checked)
         )
-        self.templates_table.setCellWidget(row, 0, checkbox)
+        self.templates_table.setIndexWidget(
+            self.templates_table_model.index(row, 0), checkbox
+        )
 
     def _on_template_checkbox_toggled(self, row: int, checked: bool) -> None:
         """Handle template row checkbox toggle."""
@@ -1083,7 +1208,7 @@ class TagsPage(QWidget):
 
     def _update_templates_header_state(self) -> None:
         """Update header checkbox state based on selections."""
-        total = self.templates_table.rowCount()
+        total = self.templates_table_model.rowCount()
         if total > 0 and len(self._selected_templates) == total:
             self._templates_header_checked = True
         else:
@@ -1103,14 +1228,16 @@ class TagsPage(QWidget):
 
     def _toggle_all_templates(self, checked: bool) -> None:
         """Toggle all template checkboxes and sync header."""
-        for row in range(self.templates_table.rowCount()):
-            widget = self.templates_table.cellWidget(row, 0)
+        for row in range(self.templates_table_model.rowCount()):
+            widget = self.templates_table.indexWidget(
+                self.templates_table_model.index(row, 0)
+            )
             if isinstance(widget, CheckboxWidget):
                 widget.blockSignals(True)
                 widget.setChecked(checked)
                 widget.blockSignals(False)
         if checked:
-            self._selected_templates = list(range(self.templates_table.rowCount()))
+            self._selected_templates = list(range(self.templates_table_model.rowCount()))
         else:
             self._selected_templates.clear()
 
@@ -1146,19 +1273,6 @@ class TagsPage(QWidget):
         ]
         if template_names:
             self.batch_delete_templates.emit(template_names)
-
-    # === Toolbar positioning ===
-
-    def eventFilter(self, obj, event):
-        """Handle events for toolbar positioning."""
-        if event.type() == QEvent.Type.Resize:
-            if obj == self._tags_table_area:
-                self._position_tags_toolbar()
-            elif obj == self._statuses_table_area:
-                self._position_statuses_toolbar()
-            elif obj == self._templates_table_area:
-                self._position_templates_toolbar()
-        return super().eventFilter(obj, event)
 
     # === Header checkbox positioning ===
 
@@ -1196,47 +1310,3 @@ class TagsPage(QWidget):
             self.templates_table, self._templates_header_checkbox
         )
 
-    def _position_tags_toolbar(self):
-        """Position tags toolbar at bottom center."""
-        QTimer.singleShot(
-            0,
-            lambda: self._do_position_toolbar(self._tags_table_area, self.tags_toolbar),
-        )
-
-    def _position_statuses_toolbar(self):
-        """Position statuses toolbar at bottom center."""
-        QTimer.singleShot(
-            0,
-            lambda: self._do_position_toolbar(
-                self._statuses_table_area, self.statuses_toolbar
-            ),
-        )
-
-    def _position_templates_toolbar(self):
-        """Position templates toolbar at bottom center."""
-        QTimer.singleShot(
-            0,
-            lambda: self._do_position_toolbar(
-                self._templates_table_area, self.templates_toolbar
-            ),
-        )
-
-    def _do_position_toolbar(
-        self, table_area: QWidget | None, toolbar: FloatingToolbar | None
-    ):
-        """Actually position toolbar at bottom center of table area."""
-        if not table_area or not toolbar:
-            return
-        if not toolbar.isVisible():
-            return
-
-        toolbar.adjustSize()
-        toolbar_width = toolbar.width()
-        area_width = table_area.width()
-        area_height = table_area.height()
-
-        x = (area_width - toolbar_width) // 2
-        y = area_height - toolbar.height() - SPACING.lg
-
-        toolbar.move(x, y)
-        toolbar.raise_()

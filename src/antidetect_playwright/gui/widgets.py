@@ -162,9 +162,10 @@ class TagWidget(QWidget):
         self.tag = tag
 
         layout = QHBoxLayout(self)
-        layout.setContentsMargins(0, 0, 0, 0)
-        layout.setSpacing(0)
+        layout.setContentsMargins(0, 0, 6, 0)
+        layout.setSpacing(4)
         layout.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
+
 
         label = QLabel(tag)
         label.setMinimumHeight(20)
@@ -199,7 +200,7 @@ class TagsWidget(QWidget):
 
     def _setup_ui(self):
         layout = QHBoxLayout(self)
-        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setContentsMargins(0, 0, 6, 0)
         layout.setSpacing(4)
         layout.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
 
@@ -213,6 +214,8 @@ class TagsWidget(QWidget):
             more.setStyleSheet(f"color: {COLORS['text_muted']}; font-size: 11px;")
             layout.addWidget(more)
 
+        layout.addStretch()
+
         # Edit button with SVG icon
         edit_btn = QPushButton()
         edit_btn.setIcon(get_icon("edit", 14))
@@ -223,8 +226,7 @@ class TagsWidget(QWidget):
         edit_btn.clicked.connect(self.edit_requested.emit)
         edit_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         layout.addWidget(edit_btn)
-
-        layout.addStretch()
+        layout.addSpacing(6)
 
     def set_tags(self, tags: list[str]):
         self.tags = tags
@@ -248,7 +250,7 @@ class NotesWidget(QWidget):
 
     def _setup_ui(self):
         layout = QHBoxLayout(self)
-        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setContentsMargins(0, 0, 6, 0)
         layout.setSpacing(4)
         layout.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
 
@@ -261,8 +263,11 @@ class NotesWidget(QWidget):
         label.setStyleSheet(f"color: {COLORS['text_secondary']}; font-size: 12px;")
         layout.addWidget(label)
 
+        layout.addStretch()
+
         # Edit button with SVG icon
         edit_btn = QPushButton()
+
         edit_btn.setIcon(get_icon("edit", 14))
         edit_btn.setIconSize(QSize(14, 14))
         edit_btn.setFixedSize(24, 24)
@@ -271,8 +276,7 @@ class NotesWidget(QWidget):
         edit_btn.clicked.connect(self.edit_requested.emit)
         edit_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         layout.addWidget(edit_btn)
-
-        layout.addStretch()
+        layout.addSpacing(6)
 
 
 class ProxyWidget(QWidget):
@@ -349,7 +353,7 @@ class ProfileNameWidget(QWidget):
 
     def _setup_ui(self):
         layout = QHBoxLayout(self)
-        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setContentsMargins(0, 0, 6, 0)
         layout.setSpacing(8)
         layout.setAlignment(Qt.AlignmentFlag.AlignVCenter)
 
@@ -444,6 +448,7 @@ class ProfileNameWidget(QWidget):
 
         btn.setCursor(Qt.CursorShape.PointingHandCursor)
         layout.addWidget(btn)
+        layout.addSpacing(6)
 
 
 class FolderItem(QFrame):

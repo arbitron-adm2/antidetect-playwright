@@ -103,6 +103,8 @@ class BrowserLauncher:
         self._browsers: dict[str, AsyncCamoufox] = {}
         self._browser_instances: dict[str, BrowserContext] = {}
         self._pages: dict[str, Page] = {}
+        self._monitor_tasks: dict[str, asyncio.Task] = {}
+        self._stopping: set[str] = set()
         self._on_status_change: Callable[[str, ProfileStatus], None] | None = None
         self._on_browser_closed: Callable[[str], None] | None = None
 
@@ -558,7 +560,8 @@ class BrowserLauncher:
             self._pages[profile.id] = page
 
             # Monitor for browser close
-            asyncio.create_task(self._monitor_browser(profile.id, context))
+            task = asyncio.create_task(self._monitor_browser(profile.id, context))
+            self._monitor_tasks[profile.id] = task
 
             if self._on_status_change:
                 self._on_status_change(profile.id, ProfileStatus.RUNNING)
@@ -573,18 +576,25 @@ class BrowserLauncher:
 
     async def _monitor_browser(self, profile_id: str, context: BrowserContext) -> None:
         """Monitor browser for manual close."""
+        cancelled = False
         try:
             # Wait for context to close (user closed window)
             await context.wait_for_event("close", timeout=0)
+        except asyncio.CancelledError:
+            cancelled = True
         except Exception:
             pass
         finally:
-            # Browser was closed manually - just cleanup
+            if cancelled:
+                return
+            # Browser was closed manually
             logger.info(f"Browser closed for profile {profile_id}")
-            if profile_id in self._browser_instances:
-                await self._cleanup_profile(profile_id)
-                if self._on_browser_closed:
-                    self._on_browser_closed(profile_id)
+            await self._cleanup_profile(profile_id)
+            if self._on_status_change:
+                self._on_status_change(profile_id, ProfileStatus.STOPPED)
+            if self._on_browser_closed:
+                self._on_browser_closed(profile_id)
+            self._stopping.discard(profile_id)
 
     async def _save_browser_state(
         self, profile_id: str, context: BrowserContext
@@ -633,6 +643,7 @@ class BrowserLauncher:
             del self._browser_instances[profile_id]
         if profile_id in self._pages:
             del self._pages[profile_id]
+        self._monitor_tasks.pop(profile_id, None)
 
     async def _restore_browser_state(
         self, profile_id: str, context: BrowserContext
@@ -679,11 +690,29 @@ class BrowserLauncher:
     async def stop_profile(self, profile_id: str) -> bool:
         """Stop browser for profile."""
         try:
+            if profile_id in self._stopping:
+                return True
+            self._stopping.add(profile_id)
+
+            if profile_id not in self._browsers and profile_id not in self._browser_instances:
+                if self._on_status_change:
+                    self._on_status_change(profile_id, ProfileStatus.STOPPED)
+                self._stopping.discard(profile_id)
+                return True
+
+            task = self._monitor_tasks.pop(profile_id, None)
+            if task is not None:
+                task.cancel()
+
             # Firefox saves sessions automatically via sessionstore.jsonlz4
             if profile_id in self._browsers:
                 camoufox = self._browsers[profile_id]
                 try:
-                    await camoufox.__aexit__(None, None, None)
+                    await asyncio.wait_for(
+                        camoufox.__aexit__(None, None, None), timeout=5
+                    )
+                except asyncio.TimeoutError:
+                    logger.warning("Timed out closing browser for %s", profile_id)
                 except Exception as e:
                     logger.warning("Error closing browser: %s", e)
 
@@ -692,15 +721,22 @@ class BrowserLauncher:
             if self._on_status_change:
                 self._on_status_change(profile_id, ProfileStatus.STOPPED)
 
+            self._stopping.discard(profile_id)
             return True
 
         except Exception as e:
             logger.exception("Error stopping profile: %s", e)
             return False
+        finally:
+            self._stopping.discard(profile_id)
 
     def is_running(self, profile_id: str) -> bool:
         """Check if profile browser is running."""
         return profile_id in self._browser_instances
+
+    def is_stopping(self, profile_id: str) -> bool:
+        """Check if profile is currently stopping."""
+        return profile_id in self._stopping
 
     async def cleanup(self) -> None:
         """Cleanup all browsers."""

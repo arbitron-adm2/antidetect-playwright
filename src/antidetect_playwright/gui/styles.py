@@ -41,7 +41,7 @@ def get_stylesheet() -> str:
     QWidget {{
         background-color: transparent;
         color: {COLORS['text_primary']};
-        font-family: "Segoe UI", "SF Pro Display", -apple-system, sans-serif;
+        font-family: system-ui, "Segoe UI", "SF Pro Text", -apple-system, sans-serif;
         font-size: 13px;
     }}
     

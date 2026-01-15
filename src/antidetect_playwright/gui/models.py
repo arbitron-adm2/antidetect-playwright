@@ -192,11 +192,15 @@ class BrowserProfile:
         proxy_data = data.get("proxy", {})
         proxy = ProxyConfig.from_dict(proxy_data, decrypt_password=True)
 
+        status_value = data.get("status", "stopped")
+        if status_value == "stopping":
+            status_value = "stopped"
+
         return cls(
             id=data.get("id", str(uuid.uuid4())),
             name=data.get("name", "New Profile"),
             folder_id=data.get("folder_id", ""),
-            status=ProfileStatus(data.get("status", "stopped")),
+            status=ProfileStatus(status_value),
             proxy=proxy,
             notes=data.get("notes", ""),
             tags=data.get("tags", []),

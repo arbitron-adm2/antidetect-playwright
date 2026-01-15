@@ -4,19 +4,23 @@ from PyQt6.QtWidgets import (
     QWidget,
     QVBoxLayout,
     QHBoxLayout,
+    QFrame,
     QLabel,
     QPushButton,
-    QTableWidget,
-    QTableWidgetItem,
-    QStackedWidget,
+    QTableView,
     QMessageBox,
+    QGridLayout,
+    QStackedWidget,
     QMenu,
 )
-from PyQt6.QtCore import Qt, pyqtSignal, QSize, QEvent, QTimer
+
+from PyQt6.QtCore import Qt, pyqtSignal, QSize
 
 from ..theme import Theme, COLORS, SPACING
 from ..icons import get_icon
-from ..components import FloatingToolbar, CheckboxWidget, HeaderCheckbox
+from ..components import FloatingToolbar, HeaderCheckbox, CheckboxWidget
+from ..modal import confirm_dialog
+from ..table_models import SimpleTableModel
 
 
 class TrashPage(QWidget):
@@ -33,8 +37,9 @@ class TrashPage(QWidget):
         self._deleted_profiles: list[dict] = []  # List of {id, name, deleted_at}
         self._selected_rows: list[int] = []
         self._header_checked = False
-        self._table_area: QWidget | None = None
+        self._compact_mode = False
         self._setup_ui()
+        self._apply_responsive_columns(self.width())
 
     def _setup_ui(self):
         """Setup page UI."""
@@ -66,15 +71,15 @@ class TrashPage(QWidget):
         self.content_stack = QStackedWidget()
 
         # Table area
-        self._table_area = QWidget()
-        table_area_layout = QVBoxLayout(self._table_area)
+        table_area = QWidget()
+        table_area_layout = QGridLayout(table_area)
         table_area_layout.setContentsMargins(0, 0, 0, 0)
         table_area_layout.setSpacing(0)
 
         # Table
         self.table = self._create_table()
         table_container = Theme.create_table_container(self.table)
-        table_area_layout.addWidget(table_container, 1)
+        table_area_layout.addWidget(table_container, 0, 0)
 
         # Header checkbox overlay
         self._header_checkbox = HeaderCheckbox()
@@ -89,17 +94,26 @@ class TrashPage(QWidget):
             lambda: self._position_header_checkbox()
         )
 
-        # Floating toolbar
+        # Floating toolbar container
+        toolbar_container = QWidget()
+        toolbar_layout = QHBoxLayout(toolbar_container)
+        toolbar_layout.setContentsMargins(0, 0, 0, SPACING.md)
+        toolbar_layout.setSpacing(0)
+        toolbar_layout.setAlignment(Qt.AlignmentFlag.AlignHCenter)
+
         self.floating_toolbar = FloatingToolbar("trash")
-        self.floating_toolbar.setParent(self._table_area)
         self.floating_toolbar.restore_clicked.connect(self._on_batch_restore)
         self.floating_toolbar.delete_clicked.connect(self._on_batch_delete)
-        self.floating_toolbar.visibility_changed.connect(
-            lambda visible: self._position_toolbar() if visible else None
+        toolbar_layout.addWidget(self.floating_toolbar)
+        table_area_layout.addWidget(
+            toolbar_container,
+            0,
+            0,
+            alignment=Qt.AlignmentFlag.AlignHCenter
+            | Qt.AlignmentFlag.AlignBottom,
         )
 
-        self._table_area.installEventFilter(self)
-        self.content_stack.addWidget(self._table_area)
+        self.content_stack.addWidget(table_area)
 
         # Empty placeholder
         empty_widget = QWidget()
@@ -119,11 +133,14 @@ class TrashPage(QWidget):
         # Start with empty state
         self.content_stack.setCurrentIndex(1)
 
-    def _create_table(self) -> QTableWidget:
+    def _create_table(self) -> QTableView:
         """Create trash table."""
-        table = QTableWidget()
-        table.setColumnCount(4)
-        table.setHorizontalHeaderLabels(["", "Name", "Deleted At", "Actions"])
+        table = QTableView()
+
+        headers = ["", "Name", "Deleted At", "Actions"]
+        self.table_model = SimpleTableModel(headers, self)
+        self.table_model.set_alignments({2: Qt.AlignmentFlag.AlignCenter})
+        table.setModel(self.table_model)
 
         # Apply unified styling first
         Theme.setup_table(table)
@@ -146,8 +163,43 @@ class TrashPage(QWidget):
 
         return table
 
+    def resizeEvent(self, event):
+        """Handle resize for responsive columns."""
+        super().resizeEvent(event)
+        self._apply_responsive_columns(event.size().width())
+
+    def _apply_responsive_columns(self, width: int) -> None:
+        """Show/hide columns based on available width."""
+        compact = width < 900
+        if compact == self._compact_mode:
+            return
+
+        self._compact_mode = compact
+        self.table.setColumnHidden(2, compact)
+
+        from PyQt6.QtWidgets import QHeaderView
+
+        header = self.table.horizontalHeader()
+        if compact:
+            header.setSectionResizeMode(0, QHeaderView.ResizeMode.Fixed)
+            self.table.setColumnWidth(0, Theme.COL_CHECKBOX)
+            header.setSectionResizeMode(1, QHeaderView.ResizeMode.Stretch)
+            header.setSectionResizeMode(3, QHeaderView.ResizeMode.Fixed)
+            self.table.setColumnWidth(3, Theme.COL_ACTIONS_MD)
+        else:
+            Theme.setup_table_columns(
+                self.table,
+                [
+                    (0, "fixed", Theme.COL_CHECKBOX),
+                    (1, "stretch", None),
+                    (2, "fixed", Theme.COL_DATE),
+                    (3, "fixed", Theme.COL_ACTIONS_MD),
+                ],
+            )
+
     def _on_context_menu(self, pos):
-        row = self.table.rowAt(pos.y())
+        index = self.table.indexAt(pos)
+        row = index.row()
         if row < 0:
             return
         self._show_row_context_menu(row, self.table.mapToGlobal(pos))
@@ -173,32 +225,29 @@ class TrashPage(QWidget):
         self.floating_toolbar.update_count(0)
 
         if not self._deleted_profiles:
+            self.table_model.set_rows([])
             self.content_stack.setCurrentIndex(1)  # Empty placeholder
             return
 
         self.content_stack.setCurrentIndex(0)  # Table
-        self.table.setRowCount(len(self._deleted_profiles))
 
-        for row, profile in enumerate(self._deleted_profiles):
+        rows: list[list[str]] = []
+        payloads: list[str | None] = []
+        for profile in self._deleted_profiles:
+            deleted_at = profile.get("deleted_at", "")
+            deleted_text = str(deleted_at)[:19] if deleted_at else "—"
+            rows.append(["", profile.get("name", "Unknown"), deleted_text, ""])
+            payloads.append(profile.get("id"))
+
+        self.table_model.set_rows(rows, payloads)
+
+        for row in range(len(self._deleted_profiles)):
             # Checkbox
             self._add_checkbox_to_row(row)
 
-            # Name
-            name_item = QTableWidgetItem(profile.get("name", "Unknown"))
-            self.table.setItem(row, 1, name_item)
-
-            # Deleted At
-            deleted_at = profile.get("deleted_at", "")
-            if deleted_at:
-                deleted_item = QTableWidgetItem(str(deleted_at)[:19])
-            else:
-                deleted_item = QTableWidgetItem("—")
-            deleted_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
-            self.table.setItem(row, 2, deleted_item)
-
             # Actions
             actions = self._create_actions_widget(row)
-            self.table.setCellWidget(row, 3, actions)
+            self.table.setIndexWidget(self.table_model.index(row, 3), actions)
 
     def _add_checkbox_to_row(self, row: int):
         """Add checkbox to row."""
@@ -212,7 +261,7 @@ class TrashPage(QWidget):
         checkbox.toggled.connect(
             lambda checked, r=row: self._on_row_checkbox_toggled(r, checked)
         )
-        self.table.setCellWidget(row, 0, checkbox)
+        self.table.setIndexWidget(self.table_model.index(row, 0), checkbox)
 
     def _create_actions_widget(self, row: int) -> QWidget:
         """Create actions widget for row."""
@@ -276,26 +325,22 @@ class TrashPage(QWidget):
         if 0 <= row < len(self._deleted_profiles):
             profile_id = self._deleted_profiles[row].get("id")
             if profile_id:
-                reply = QMessageBox.question(
+                if confirm_dialog(
                     self,
                     "Confirm Delete",
                     "This action cannot be undone. Delete permanently?",
-                    QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
-                )
-                if reply == QMessageBox.StandardButton.Yes:
+                ):
                     self.permanent_delete_requested.emit([profile_id])
 
     def _on_empty_trash(self):
         """Handle empty trash button."""
         if not self._deleted_profiles:
             return
-        reply = QMessageBox.question(
+        if confirm_dialog(
             self,
             "Empty Trash",
             f"Permanently delete {len(self._deleted_profiles)} profile(s)? This cannot be undone.",
-            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
-        )
-        if reply == QMessageBox.StandardButton.Yes:
+        ):
             self.permanent_delete_requested.emit(
                 [p["id"] for p in self._deleted_profiles]
             )
@@ -313,15 +358,15 @@ class TrashPage(QWidget):
 
     def _toggle_all_checkboxes(self, checked: bool):
         """Toggle all checkboxes and sync header."""
-        for row in range(self.table.rowCount()):
-            widget = self.table.cellWidget(row, 0)
+        for row in range(self.table_model.rowCount()):
+            widget = self.table.indexWidget(self.table_model.index(row, 0))
             if isinstance(widget, CheckboxWidget):
                 widget.blockSignals(True)
                 widget.setChecked(checked)
                 widget.blockSignals(False)
 
         if checked:
-            self._selected_rows = list(range(self.table.rowCount()))
+            self._selected_rows = list(range(self.table_model.rowCount()))
         else:
             self._selected_rows.clear()
 
@@ -347,7 +392,7 @@ class TrashPage(QWidget):
 
     def _update_header_state(self):
         """Update header checkbox state."""
-        total = self.table.rowCount()
+        total = self.table_model.rowCount()
         if total > 0 and len(self._selected_rows) == total:
             self._header_checked = True
         else:
@@ -366,12 +411,12 @@ class TrashPage(QWidget):
 
     def get_selected_profile_ids(self) -> list[str]:
         """Get selected profile IDs."""
-        return [
-            self._deleted_profiles[row].get("id")
-            for row in sorted(self._selected_rows)
-            if row < len(self._deleted_profiles)
-            and self._deleted_profiles[row].get("id")
-        ]
+        ids: list[str] = []
+        for row in sorted(self._selected_rows):
+            profile_id = self.table_model.payload_at(row)
+            if profile_id:
+                ids.append(profile_id)
+        return ids
 
     def _on_batch_restore(self):
         """Handle batch restore."""
@@ -384,13 +429,11 @@ class TrashPage(QWidget):
         """Handle batch delete."""
         ids = self.get_selected_profile_ids()
         if ids:
-            reply = QMessageBox.question(
+            if confirm_dialog(
                 self,
                 "Confirm Delete",
-                f"Permanently delete {len(ids)} profile(s)? This cannot be undone.",
-                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
-            )
-            if reply == QMessageBox.StandardButton.Yes:
+                "Delete selected profiles permanently?",
+            ):
                 self.permanent_delete_requested.emit(ids)
                 self._toggle_all_checkboxes(False)
 
@@ -402,33 +445,7 @@ class TrashPage(QWidget):
             return
         Theme.position_header_checkbox(self.table, self._header_checkbox)
 
-    def eventFilter(self, obj, event):
-        """Handle events for toolbar positioning."""
-        if obj == self._table_area and event.type() == QEvent.Type.Resize:
-            self._position_toolbar()
-        return super().eventFilter(obj, event)
 
-    def _position_toolbar(self):
-        """Position floating toolbar."""
-        QTimer.singleShot(0, self._do_position_toolbar)
-
-    def _do_position_toolbar(self):
-        """Actually position toolbar."""
-        if not self._table_area or not self.floating_toolbar:
-            return
-        if not self.floating_toolbar.isVisible():
-            return
-
-        self.floating_toolbar.adjustSize()
-        toolbar_width = self.floating_toolbar.width()
-        area_width = self._table_area.width()
-        area_height = self._table_area.height()
-
-        x = (area_width - toolbar_width) // 2
-        y = area_height - self.floating_toolbar.height() - SPACING.lg
-
-        self.floating_toolbar.move(x, y)
-        self.floating_toolbar.raise_()
 
     def set_empty(self, is_empty: bool):
         """Toggle empty state visibility."""

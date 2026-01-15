@@ -8,21 +8,26 @@ from PyQt6.QtWidgets import (
     QHBoxLayout,
     QFrame,
     QLabel,
-    QPushButton,
-    QTableWidget,
-    QTableWidgetItem,
-    QTextEdit,
     QLineEdit,
+    QTextEdit,
+    QPushButton,
+    QTableView,
     QMessageBox,
+    QScrollArea,
+    QGridLayout,
     QMenu,
 )
-from PyQt6.QtCore import Qt, pyqtSignal, QSize, QEvent, QTimer
+
+from PyQt6.QtCore import Qt, pyqtSignal, QSize
 
 from ..theme import Theme, COLORS, TYPOGRAPHY, SPACING
+from ..styles import get_country_flag
 from ..icons import get_icon
 from ..models import ProxyConfig
 from ..proxy_utils import parse_proxy_list, ping_proxy, detect_proxy_geo
 from ..components import FloatingToolbar, CheckboxWidget, HeaderCheckbox, InlineAlert
+from ..modal import confirm_dialog, get_text_dialog
+from ..table_models import SimpleTableModel
 
 
 class ProxyPage(QWidget):
@@ -40,8 +45,9 @@ class ProxyPage(QWidget):
         self.proxies: list[ProxyConfig] = []
         self._selected_rows = []
         self._header_checked = False
-        self._table_area: QWidget | None = None
+        self._compact_mode = False
         self._setup_ui()
+        self._apply_responsive_columns(self.width())
 
     def _setup_ui(self):
         """Setup page UI."""
@@ -70,16 +76,16 @@ class ProxyPage(QWidget):
         self._alert = InlineAlert(self)
         layout.addWidget(self._alert)
 
-        # Table area with overlay toolbar
+        # Table area with toolbar
         table_area = QWidget()
-        table_area_layout = QVBoxLayout(table_area)
+        table_area_layout = QGridLayout(table_area)
         table_area_layout.setContentsMargins(0, 0, 0, 0)
         table_area_layout.setSpacing(0)
 
         # Proxy table
         self.table = self._create_table()
         table_container = Theme.create_table_container(self.table)
-        table_area_layout.addWidget(table_container, 1)
+        table_area_layout.addWidget(table_container, 0, 0)
 
         # Header checkbox overlay (positioned over first header column)
         self._header_checkbox = HeaderCheckbox()
@@ -95,18 +101,25 @@ class ProxyPage(QWidget):
             lambda: self._position_header_checkbox()
         )
 
-        # Floating toolbar (overlay at bottom center)
+        # Floating toolbar container (overlay)
+        toolbar_container = QWidget()
+        toolbar_layout = QHBoxLayout(toolbar_container)
+        toolbar_layout.setContentsMargins(0, 0, 0, SPACING.md)
+        toolbar_layout.setSpacing(0)
+        toolbar_layout.setAlignment(Qt.AlignmentFlag.AlignHCenter)
+
         self.floating_toolbar = FloatingToolbar("proxy")
-        self.floating_toolbar.setParent(table_area)
         self.floating_toolbar.ping_clicked.connect(self._on_batch_ping)
         self.floating_toolbar.delete_clicked.connect(self._on_batch_delete)
-        self.floating_toolbar.visibility_changed.connect(
-            lambda visible: self._position_toolbar() if visible else None
-        )
+        toolbar_layout.addWidget(self.floating_toolbar)
 
-        # Store reference for positioning
-        self._table_area = table_area
-        table_area.installEventFilter(self)
+        table_area_layout.addWidget(
+            toolbar_container,
+            0,
+            0,
+            alignment=Qt.AlignmentFlag.AlignHCenter
+            | Qt.AlignmentFlag.AlignBottom,
+        )
 
         layout.addWidget(table_area, 1)
 
@@ -151,13 +164,22 @@ class ProxyPage(QWidget):
 
         layout.addWidget(add_frame)
 
-    def _create_table(self) -> QTableWidget:
+    def _create_table(self) -> QTableView:
         """Create proxy table with checkbox column."""
-        table = QTableWidget()
-        table.setColumnCount(8)  # Checkbox + 7 columns
-        table.setHorizontalHeaderLabels(
-            ["", "Type", "Host", "Port", "Auth", "Country", "Ping", "Actions"]
+        table = QTableView()
+
+        headers = ["", "Type", "Host", "Port", "Auth", "Country", "Ping", "Actions"]
+        self.table_model = SimpleTableModel(headers, self)
+        self.table_model.set_alignments(
+            {
+                1: Qt.AlignmentFlag.AlignCenter,
+                3: Qt.AlignmentFlag.AlignCenter,
+                4: Qt.AlignmentFlag.AlignCenter,
+                5: Qt.AlignmentFlag.AlignCenter,
+                6: Qt.AlignmentFlag.AlignCenter,
+            }
         )
+        table.setModel(self.table_model)
 
         # Unified table styling first
         Theme.setup_table(table)
@@ -186,8 +208,54 @@ class ProxyPage(QWidget):
 
         return table
 
+    def resizeEvent(self, event):
+        """Handle resize for responsive columns."""
+        super().resizeEvent(event)
+        self._apply_responsive_columns(event.size().width())
+
+    def _apply_responsive_columns(self, width: int) -> None:
+        """Show/hide columns based on available width."""
+        compact = width < 1050
+        if compact == self._compact_mode:
+            return
+
+        self._compact_mode = compact
+
+        hidden_columns = [4, 5, 6]  # Auth, Country, Ping
+        for col in hidden_columns:
+            self.table.setColumnHidden(col, compact)
+
+        from PyQt6.QtWidgets import QHeaderView
+
+        header = self.table.horizontalHeader()
+        if compact:
+            header.setSectionResizeMode(0, QHeaderView.ResizeMode.Fixed)
+            self.table.setColumnWidth(0, Theme.COL_CHECKBOX)
+            header.setSectionResizeMode(1, QHeaderView.ResizeMode.Fixed)
+            self.table.setColumnWidth(1, 70)
+            header.setSectionResizeMode(2, QHeaderView.ResizeMode.Stretch)
+            header.setSectionResizeMode(3, QHeaderView.ResizeMode.Fixed)
+            self.table.setColumnWidth(3, 70)
+            header.setSectionResizeMode(7, QHeaderView.ResizeMode.Fixed)
+            self.table.setColumnWidth(7, Theme.COL_ACTIONS_LG)
+        else:
+            Theme.setup_table_columns(
+                self.table,
+                [
+                    (0, "fixed", Theme.COL_CHECKBOX),
+                    (1, "fixed", 70),
+                    (2, "stretch", None),
+                    (3, "fixed", 70),
+                    (4, "fixed", 60),
+                    (5, "fixed", 80),
+                    (6, "fixed", 80),
+                    (7, "fixed", Theme.COL_ACTIONS_LG),
+                ],
+            )
+
     def _on_context_menu(self, pos):
-        row = self.table.rowAt(pos.y())
+        index = self.table.indexAt(pos)
+        row = index.row()
         if row < 0:
             return
         self._show_row_context_menu(row, self.table.mapToGlobal(pos))
@@ -213,52 +281,37 @@ class ProxyPage(QWidget):
         """Refresh proxy table."""
         previous_selected = set(self._selected_rows) if preserve_selection else set()
         self._selected_rows = []
-        self.table.setRowCount(len(self.proxies))
+
+        rows: list[list[str]] = []
+        for proxy in self.proxies:
+            auth_text = "Yes" if proxy.username else "No"
+            country_code = proxy.country_code.upper() if proxy.country_code else ""
+            flag = get_country_flag(country_code)
+            country_text = f"{flag} {country_code}".strip()
+            ping_text = f"{proxy.ping_ms}ms" if proxy.ping_ms > 0 else "—"
+
+            rows.append(
+                [
+                    "",
+                    proxy.proxy_type.value.upper(),
+                    proxy.host,
+                    str(proxy.port),
+                    auth_text,
+                    country_text,
+                    ping_text,
+                    "",
+                ]
+            )
+
+        self.table_model.set_rows(rows, list(self.proxies))
 
         for row, proxy in enumerate(self.proxies):
             # Checkbox
             self.add_checkbox_to_row(row, checked=row in previous_selected)
 
-            # Type
-            type_item = QTableWidgetItem(proxy.proxy_type.value.upper())
-            type_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
-            self.table.setItem(row, 1, type_item)
-
-            # Host
-            host_item = QTableWidgetItem(proxy.host)
-            self.table.setItem(row, 2, host_item)
-
-            # Port
-            port_item = QTableWidgetItem(str(proxy.port))
-            port_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
-            self.table.setItem(row, 3, port_item)
-
-            # Auth
-            auth_text = "Yes" if proxy.username else "No"
-            auth_item = QTableWidgetItem(auth_text)
-            auth_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
-            self.table.setItem(row, 4, auth_item)
-
-            # Country - SVG globe icon
-            country_code = proxy.country_code.upper() if proxy.country_code else ""
-            country_item = QTableWidgetItem(country_code)
-            country_item.setIcon(get_icon("proxy", 14))
-            country_item.setToolTip(country_code if country_code else "Unknown")
-            country_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
-            self.table.setItem(row, 5, country_item)
-
-            # Ping
-            if proxy.ping_ms > 0:
-                ping_text = f"{proxy.ping_ms}ms"
-            else:
-                ping_text = "—"
-            ping_item = QTableWidgetItem(ping_text)
-            ping_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
-            self.table.setItem(row, 6, ping_item)
-
             # Actions
             actions_widget = self._create_actions_widget(row)
-            self.table.setCellWidget(row, 7, actions_widget)
+            self.table.setIndexWidget(self.table_model.index(row, 7), actions_widget)
 
         self._update_selection()
         self._update_header_state()
@@ -358,13 +411,11 @@ class ProxyPage(QWidget):
             if proxy.username and proxy.password:
                 current += f":{proxy.username}:{proxy.password}"
 
-            from PyQt6.QtWidgets import QInputDialog
-
-            new_value, ok = QInputDialog.getText(
+            new_value, ok = get_text_dialog(
                 self,
                 "Edit Proxy",
                 "Format: host:port or host:port:user:pass",
-                text=current,
+                current,
             )
             if ok and new_value:
                 parsed, errors = parse_proxy_list(new_value)
@@ -459,13 +510,12 @@ class ProxyPage(QWidget):
         if not self.proxies:
             return
 
-        reply = QMessageBox.question(
+        if confirm_dialog(
             self,
-            "Clear Proxy Pool",
-            "Remove all proxies from the pool?",
-            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
-        )
-        if reply == QMessageBox.StandardButton.Yes:
+            "Delete Proxy",
+            f"Delete proxy {proxy.host}:{proxy.port}?",
+        ):
+
             self.proxies.clear()
             self._refresh_table()
             self.proxy_pool_changed.emit(self.proxies)
@@ -493,7 +543,7 @@ class ProxyPage(QWidget):
             checkbox.setChecked(True)
             checkbox.blockSignals(False)
             self._selected_rows.append(row)
-        self.table.setCellWidget(row, 0, checkbox)
+        self.table.setIndexWidget(self.table_model.index(row, 0), checkbox)
 
     def _on_header_section_clicked(self, section: int) -> None:
         """Handle header section click - pass through (HeaderCheckbox handles toggle)."""
@@ -506,15 +556,15 @@ class ProxyPage(QWidget):
 
     def _toggle_all_checkboxes(self, checked: bool) -> None:
         """Set all checkboxes to checked state."""
-        for row in range(self.table.rowCount()):
-            widget = self.table.cellWidget(row, 0)
+        for row in range(self.table_model.rowCount()):
+            widget = self.table.indexWidget(self.table_model.index(row, 0))
             if isinstance(widget, CheckboxWidget):
                 widget.blockSignals(True)
                 widget.setChecked(checked)
                 widget.blockSignals(False)
 
         if checked:
-            self._selected_rows = list(range(self.table.rowCount()))
+            self._selected_rows = list(range(self.table_model.rowCount()))
         else:
             self._selected_rows.clear()
         self._update_selection()
@@ -533,7 +583,7 @@ class ProxyPage(QWidget):
 
     def _update_header_state(self) -> None:
         """Update header checkbox state based on selections."""
-        total = self.table.rowCount()
+        total = self.table_model.rowCount()
         if total > 0 and len(self._selected_rows) == total:
             self._header_checked = True
         else:
@@ -583,36 +633,3 @@ class ProxyPage(QWidget):
             return
         Theme.position_header_checkbox(self.table, self._header_checkbox)
 
-    # === Toolbar positioning ===
-
-    def eventFilter(self, obj, event):
-        """Handle events for toolbar positioning."""
-        if obj == self._table_area and event.type() == QEvent.Type.Resize:
-            self._position_toolbar()
-        return super().eventFilter(obj, event)
-
-    def _position_toolbar(self):
-        """Position floating toolbar at bottom center of table area."""
-        if not self._table_area or not self.floating_toolbar:
-            return
-
-        # Defer positioning to ensure layout is complete
-        QTimer.singleShot(0, self._do_position_toolbar)
-
-    def _do_position_toolbar(self):
-        """Actually position the toolbar."""
-        if not self._table_area or not self.floating_toolbar:
-            return
-        if not self.floating_toolbar.isVisible():
-            return
-
-        self.floating_toolbar.adjustSize()
-        toolbar_width = self.floating_toolbar.width()
-        area_width = self._table_area.width()
-        area_height = self._table_area.height()
-
-        x = (area_width - toolbar_width) // 2
-        y = area_height - self.floating_toolbar.height() - SPACING.lg
-
-        self.floating_toolbar.move(x, y)
-        self.floating_toolbar.raise_()

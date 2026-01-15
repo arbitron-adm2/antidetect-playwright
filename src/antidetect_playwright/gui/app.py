@@ -20,7 +20,6 @@ from PyQt6.QtWidgets import (
     QVBoxLayout,
     QHBoxLayout,
     QPushButton,
-    QTableWidgetItem,
     QMessageBox,
     QMenu,
     QStackedWidget,
@@ -223,6 +222,20 @@ class MainWindow(QMainWindow):
 
     def _load_data(self):
         """Load and display data."""
+        for profile in self.storage.get_profiles():
+            running = self.launcher.is_running(profile.id)
+            if running:
+                next_status = ProfileStatus.RUNNING
+            else:
+                next_status = (
+                    ProfileStatus.ERROR
+                    if profile.status == ProfileStatus.ERROR
+                    else ProfileStatus.STOPPED
+                )
+            if profile.status != next_status:
+                profile.status = next_status
+                self.storage.update_profile(profile)
+
         self._refresh_folders()
         self._refresh_table()
         self._refresh_tags()
@@ -278,13 +291,29 @@ class MainWindow(QMainWindow):
 
         # Update table
         table = self.profiles_page.table
-        table.setRowCount(len(page_profiles))
+        rows: list[list[str]] = []
+        payloads: list[str] = []
+
+        for profile in page_profiles:
+            running = self.launcher.is_running(profile.id)
+            if running:
+                next_status = ProfileStatus.RUNNING
+            else:
+                next_status = (
+                    ProfileStatus.ERROR
+                    if profile.status == ProfileStatus.ERROR
+                    else ProfileStatus.STOPPED
+                )
+            if profile.status != next_status:
+                profile.status = next_status
+                self.storage.update_profile(profile)
+
+            rows.append(["", "", "", "", "", "", ""])
+            payloads.append(profile.id)
+
+        self.profiles_page.table_model.set_rows(rows, payloads)
 
         for row, profile in enumerate(page_profiles):
-            # Check if running
-            if self.launcher.is_running(profile.id):
-                profile.status = ProfileStatus.RUNNING
-
             # Checkbox column (index 0)
             self.profiles_page.add_checkbox_to_row(
                 row, checked=profile.id in selected_profile_ids
@@ -302,7 +331,7 @@ class MainWindow(QMainWindow):
                     p, w.mapToGlobal(w.rect().bottomLeft())
                 )
             )
-            table.setCellWidget(row, 1, name_widget)
+            table.setIndexWidget(self.profiles_page.table_model.index(row, 1), name_widget)
 
             # Status (index 2)
             status_badge = StatusBadge(profile.status)
@@ -312,7 +341,7 @@ class MainWindow(QMainWindow):
                     p, w.mapToGlobal(w.rect().bottomLeft())
                 )
             )
-            table.setCellWidget(row, 2, status_badge)
+            table.setIndexWidget(self.profiles_page.table_model.index(row, 2), status_badge)
 
             # Notes (index 3)
             notes_widget = NotesWidget(profile.notes)
@@ -323,7 +352,7 @@ class MainWindow(QMainWindow):
                     p, w.mapToGlobal(w.rect().bottomLeft())
                 )
             )
-            table.setCellWidget(row, 3, notes_widget)
+            table.setIndexWidget(self.profiles_page.table_model.index(row, 3), notes_widget)
 
             # Tags (index 4)
             tags_widget = TagsWidget(profile.tags)
@@ -335,7 +364,7 @@ class MainWindow(QMainWindow):
                     p, w.mapToGlobal(w.rect().bottomLeft())
                 )
             )
-            table.setCellWidget(row, 4, tags_widget)
+            table.setIndexWidget(self.profiles_page.table_model.index(row, 4), tags_widget)
 
             # Proxy (index 5)
             proxy_widget = ProxyWidget(profile.proxy)
@@ -345,7 +374,7 @@ class MainWindow(QMainWindow):
                     p, w.mapToGlobal(w.rect().bottomLeft())
                 )
             )
-            table.setCellWidget(row, 5, proxy_widget)
+            table.setIndexWidget(self.profiles_page.table_model.index(row, 5), proxy_widget)
 
             # Actions (index 6)
             actions_widget = QWidget()
@@ -397,12 +426,7 @@ class MainWindow(QMainWindow):
             actions_layout.addWidget(change_btn)
 
             actions_layout.addStretch()
-            table.setCellWidget(row, 6, actions_widget)
-
-            # Store profile ID in Name column (index 1)
-            item = QTableWidgetItem()
-            item.setData(Qt.ItemDataRole.UserRole, profile.id)
-            table.setItem(row, 1, item)
+            table.setIndexWidget(self.profiles_page.table_model.index(row, 6), actions_widget)
 
         # Keep toolbar + header checkbox state consistent after rebuild
         self.profiles_page._update_selection()
@@ -544,12 +568,11 @@ class MainWindow(QMainWindow):
             self._refresh_folders()
             self._refresh_table()
 
-    def _on_profile_context_menu(self, item, pos):
+    def _on_profile_context_menu(self, profile_id: str, pos):
         """Handle profile context menu request."""
-        if not item:
+        if not profile_id:
             return
 
-        profile_id = item.data(Qt.ItemDataRole.UserRole)
         profile = self._safe_get_profile(profile_id)
         if profile is None:
             return
@@ -560,7 +583,8 @@ class MainWindow(QMainWindow):
         """Show profile context menu."""
         menu = QMenu(self)
 
-        if profile.status == ProfileStatus.RUNNING:
+        running = self.launcher.is_running(profile.id)
+        if running:
             stop_action = menu.addAction("Stop")
             stop_action.triggered.connect(lambda: self._stop_profile(profile))
         else:
@@ -681,6 +705,8 @@ class MainWindow(QMainWindow):
         profile.last_used = datetime.now()
         self.storage.update_profile(profile)
 
+        if self.launcher.is_running(profile.id):
+            return
         success = await self.launcher.launch_profile(profile)
         if success:
             self._refresh_table()
@@ -688,7 +714,18 @@ class MainWindow(QMainWindow):
     @qasync.asyncSlot(object)
     async def _stop_profile(self, profile: BrowserProfile):
         """Stop browser for profile."""
-        await self.launcher.stop_profile(profile.id)
+        if self.launcher.is_stopping(profile.id):
+            return
+        if not self.launcher.is_running(profile.id):
+            profile.status = ProfileStatus.STOPPED
+            self.storage.update_profile(profile)
+            self._refresh_table()
+            return
+
+        success = await self.launcher.stop_profile(profile.id)
+        if not success:
+            profile.status = ProfileStatus.ERROR
+            self.storage.update_profile(profile)
         self._refresh_table()
 
     def _on_status_change(self, profile_id: str, status: ProfileStatus):

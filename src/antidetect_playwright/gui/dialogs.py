@@ -7,20 +7,21 @@ from PyQt6.QtWidgets import (
     QFormLayout,
     QLineEdit,
     QComboBox,
-    QTextEdit,
-    QPushButton,
-    QLabel,
-    QGroupBox,
-    QSpinBox,
     QListWidget,
     QListWidgetItem,
-    QMessageBox,
-    QInputDialog,
+    QMenu,
+    QSpinBox,
+    QTabWidget,
     QWidget,
+    QLabel,
+    QPushButton,
+    QTextEdit,
     QTableWidget,
     QTableWidgetItem,
+    QGroupBox,
     QHeaderView,
-    QTabWidget,
+    QMessageBox,
+
     QCheckBox,
     QFileDialog,
 )
@@ -28,8 +29,15 @@ from PyQt6.QtCore import Qt
 from PyQt6.QtGui import QColor, QPixmap, QIcon
 
 from .models import BrowserProfile, Folder, ProxyConfig, ProxyType
-from .styles import COLORS
+from .styles import COLORS, get_country_flag
 from .proxy_utils import parse_proxy_string
+from .modal import (
+    confirm_dialog,
+    info_dialog,
+    error_dialog,
+    warning_dialog,
+    get_item_dialog,
+)
 
 
 class ProfileDialog(QDialog):
@@ -236,7 +244,7 @@ class ProfileDialog(QDialog):
 
         proxy_pool = self.storage.get_proxy_pool()
         if not proxy_pool.proxies:
-            QMessageBox.information(
+            info_dialog(
                 self,
                 "Empty Pool",
                 "Proxy pool is empty. Add proxies in the Proxy page first.",
@@ -247,12 +255,19 @@ class ProfileDialog(QDialog):
         items = []
         for proxy in proxy_pool.proxies:
             auth = f" (auth: {proxy.username})" if proxy.username else ""
-            items.append(
-                f"{proxy.proxy_type.value.upper()}://{proxy.host}:{proxy.port}{auth}"
-            )
+            flag = get_country_flag(proxy.country_code)
+            label = f"{proxy.proxy_type.value.upper()}://{proxy.host}:{proxy.port}{auth}"
+            if flag:
+                label = f"{flag} {label}"
+            items.append(label)
 
-        item, ok = QInputDialog.getItem(
-            self, "Select Proxy from Pool", "Choose proxy:", items, 0, False
+        item, ok = get_item_dialog(
+            self,
+            "Select Proxy from Pool",
+            "Choose proxy:",
+            items,
+            0,
+            False,
         )
 
         if ok and item:
@@ -266,7 +281,7 @@ class ProfileDialog(QDialog):
         # Enable OS combo temporarily to allow selection
         self.os_combo.setEnabled(True)
 
-        reply = QMessageBox.warning(
+        if confirm_dialog(
             self,
             "Regenerate Fingerprint",
             "⚠️ This will generate a completely new fingerprint:\n\n"
@@ -277,11 +292,8 @@ class ProfileDialog(QDialog):
             "The profile will appear as a different browser.\n"
             "Select the OS for the new fingerprint and click Save.\n\n"
             "Continue?",
-            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
-            QMessageBox.StandardButton.No,
-        )
-
-        if reply == QMessageBox.StandardButton.Yes:
+            icon=QMessageBox.Icon.Warning,
+        ):
             # Mark for regeneration - will delete fingerprint.json on save
             self._regenerate_on_save = True
             self._alert.show_success(
@@ -491,6 +503,7 @@ class TagsEditDialog(QDialog):
         super().__init__(parent)
         self.current_tags = list(current_tags)
         self.all_tags = all_tags
+        self.available_tags = [t for t in self.all_tags if t not in self.current_tags]
         self._setup_ui()
 
     def _setup_ui(self):
@@ -501,32 +514,38 @@ class TagsEditDialog(QDialog):
         layout = QVBoxLayout(self)
         layout.setSpacing(12)
 
-        from .components import InlineAlert, make_combobox_searchable
+        from .components import InlineAlert
 
         self._alert = InlineAlert(self)
         layout.addWidget(self._alert)
 
         # Add from pool section
-        available = [t for t in self.all_tags if t not in self.current_tags]
-        if available:
+        if self.available_tags:
             layout.addWidget(QLabel("Add from pool:"))
 
-            pool_layout = QHBoxLayout()
-            pool_layout.setSpacing(8)
+            search_layout = QHBoxLayout()
+            search_layout.setSpacing(8)
 
-            self.tags_combo = QComboBox()
-            self.tags_combo.addItems(available)
-            make_combobox_searchable(self.tags_combo, "Search tags")
-            pool_layout.addWidget(self.tags_combo, 1)
+            self.available_search = QLineEdit()
+            self.available_search.setPlaceholderText("Search tags")
+            self.available_search.textChanged.connect(self._filter_available_tags)
+            search_layout.addWidget(self.available_search, 1)
+            layout.addLayout(search_layout)
+
+            self.available_list = QListWidget()
+            self.available_list.addItems(self.available_tags)
+            self.available_list.itemDoubleClicked.connect(
+                lambda _item: self._add_from_pool()
+            )
+            layout.addWidget(self.available_list, 1)
 
             add_pool_btn = QPushButton("Add")
             add_pool_btn.setProperty("class", "primary")
             add_pool_btn.clicked.connect(self._add_from_pool)
-            pool_layout.addWidget(add_pool_btn)
-
-            layout.addLayout(pool_layout)
+            layout.addWidget(add_pool_btn)
         else:
-            self.tags_combo = None
+            self.available_search = None
+            self.available_list = None
 
         # Add custom tag section
         layout.addWidget(QLabel("Add custom tag:"))
@@ -574,21 +593,42 @@ class TagsEditDialog(QDialog):
             item.setData(Qt.ItemDataRole.UserRole, tag)
             self.tags_list.addItem(item)
 
-    def _add_from_pool(self):
-        if not self.tags_combo:
+    def _filter_available_tags(self, text: str) -> None:
+        if not self.available_list:
             return
-        tag = self.tags_combo.currentText().strip()
+        text = text.lower().strip()
+        for row in range(self.available_list.count()):
+            item = self.available_list.item(row)
+            item.setHidden(text not in item.text().lower())
+
+    def _refresh_available_list(self) -> None:
+        if not self.available_list:
+            return
+        self.available_list.clear()
+        self.available_list.addItems(self.available_tags)
+        if self.available_search:
+            self._filter_available_tags(self.available_search.text())
+
+    def _add_from_pool(self):
+        if not self.available_list:
+            return
+        item = self.available_list.currentItem()
+        if not item and self.available_list.count() > 0:
+            self.available_list.setCurrentRow(0)
+            item = self.available_list.currentItem()
+        if not item:
+            return
+        tag = item.text().strip()
         if not tag:
             return
         if tag in self.current_tags:
             self._alert.show_error("Duplicate", f"Tag '{tag}' already added.")
             return
         self.current_tags.append(tag)
+        if tag in self.available_tags:
+            self.available_tags.remove(tag)
         self._refresh_tags_list()
-        # Remove from combo
-        idx = self.tags_combo.findText(tag)
-        if idx >= 0:
-            self.tags_combo.removeItem(idx)
+        self._refresh_available_list()
 
     def _add_custom_tag(self):
         tag = self.new_tag_input.text().strip()
@@ -598,22 +638,21 @@ class TagsEditDialog(QDialog):
             self._alert.show_error("Duplicate", f"Tag '{tag}' already added.")
             return
         self.current_tags.append(tag)
+        if tag in self.available_tags:
+            self.available_tags.remove(tag)
         self._refresh_tags_list()
+        self._refresh_available_list()
         self.new_tag_input.clear()
-        # Remove from combo if exists
-        if self.tags_combo:
-            idx = self.tags_combo.findText(tag)
-            if idx >= 0:
-                self.tags_combo.removeItem(idx)
 
     def _remove_tag(self, item: QListWidgetItem):
         tag = item.data(Qt.ItemDataRole.UserRole)
         if tag in self.current_tags:
             self.current_tags.remove(tag)
             self._refresh_tags_list()
-            # Add back to combo if it was from pool
-            if self.tags_combo and tag in self.all_tags:
-                self.tags_combo.addItem(tag)
+            if tag in self.all_tags and tag not in self.available_tags:
+                self.available_tags.append(tag)
+                self.available_tags.sort()
+                self._refresh_available_list()
 
     def get_tags(self) -> list[str]:
         return self.current_tags
@@ -641,7 +680,7 @@ class NotesEditDialog(QDialog):
         layout = QVBoxLayout(self)
         layout.setSpacing(12)
 
-        from .components import InlineAlert, make_combobox_searchable
+        from .components import InlineAlert
 
         self._alert = InlineAlert(self)
         layout.addWidget(self._alert)
@@ -650,14 +689,20 @@ class NotesEditDialog(QDialog):
         if self._note_templates:
             layout.addWidget(QLabel("Insert from templates:"))
 
+            self.template_search = QLineEdit()
+            self.template_search.setPlaceholderText("Search templates")
+            self.template_search.textChanged.connect(self._filter_templates)
+            layout.addWidget(self.template_search)
+
+            self.template_list = QListWidget()
+            self.template_list.addItems([name for name, _ in self._note_templates])
+            self.template_list.itemDoubleClicked.connect(
+                lambda _item: self._insert_template()
+            )
+            layout.addWidget(self.template_list, 1)
+
             templates_row = QHBoxLayout()
             templates_row.setSpacing(8)
-
-            self.template_combo = QComboBox()
-            for name, _content in self._note_templates:
-                self.template_combo.addItem(name)
-            make_combobox_searchable(self.template_combo, "Search templates")
-            templates_row.addWidget(self.template_combo, 1)
 
             insert_btn = QPushButton("Insert")
             insert_btn.setProperty("class", "primary")
@@ -669,6 +714,9 @@ class NotesEditDialog(QDialog):
             templates_row.addWidget(replace_btn)
 
             layout.addLayout(templates_row)
+        else:
+            self.template_search = None
+            self.template_list = None
 
         # Notes editor
         layout.addWidget(QLabel("Notes:"))
@@ -692,6 +740,23 @@ class NotesEditDialog(QDialog):
 
         layout.addLayout(btn_layout)
 
+    def _filter_templates(self, text: str) -> None:
+        if not self.template_list:
+            return
+        text = text.lower().strip()
+        for row in range(self.template_list.count()):
+            item = self.template_list.item(row)
+            item.setHidden(text not in item.text().lower())
+
+    def _selected_template_name(self) -> str:
+        if not self.template_list:
+            return ""
+        item = self.template_list.currentItem()
+        if not item and self.template_list.count() > 0:
+            self.template_list.setCurrentRow(0)
+            item = self.template_list.currentItem()
+        return item.text().strip() if item else ""
+
     def _get_template_content(self, name: str) -> str:
         for n, content in self._note_templates:
             if n == name:
@@ -701,7 +766,7 @@ class NotesEditDialog(QDialog):
     def _insert_template(self):
         if not self._note_templates:
             return
-        name = self.template_combo.currentText().strip()
+        name = self._selected_template_name()
         if not name:
             return
         content = self._get_template_content(name)
@@ -718,7 +783,7 @@ class NotesEditDialog(QDialog):
     def _replace_with_template(self):
         if not self._note_templates:
             return
-        name = self.template_combo.currentText().strip()
+        name = self._selected_template_name()
         if not name:
             return
         content = self._get_template_content(name)
@@ -795,7 +860,10 @@ class ProxyPoolDialog(QDialog):
         for p in self.proxies:
             text = f"{p.proxy_type.value.upper()}://{p.host}:{p.port}"
             if p.username:
-                text += f" (auth)"
+                text += " (auth)"
+            flag = get_country_flag(p.country_code)
+            if flag:
+                text = f"{flag} {text}"
             item = QListWidgetItem(text)
             self.proxy_list.addItem(item)
 
@@ -1873,7 +1941,7 @@ class ProfileDataDialog(QDialog):
 
         clipboard = QApplication.clipboard()
         clipboard.setText(text_widget.toPlainText())
-        QMessageBox.information(self, "Copied", "Content copied to clipboard!")
+        info_dialog(self, "Copied", "Content copied to clipboard!")
 
     def _export_cookies(self):
         """Export cookies to JSON file."""
@@ -1921,12 +1989,12 @@ class ProfileDataDialog(QDialog):
             with open(file_path, "w") as f:
                 json.dump(cookies, f, indent=2)
 
-            QMessageBox.information(
+            info_dialog(
                 self, "Exported", f"Exported {len(cookies)} cookies to {file_path}"
             )
 
         except Exception as e:
-            QMessageBox.critical(self, "Error", f"Export failed: {e}")
+            error_dialog(self, "Error", f"Export failed: {e}")
 
     def _import_cookies(self):
         """Import cookies from JSON file."""
@@ -1978,22 +2046,19 @@ class ProfileDataDialog(QDialog):
             conn.commit()
             conn.close()
 
-            QMessageBox.information(self, "Imported", f"Imported {imported} cookies")
+            info_dialog(self, "Imported", f"Imported {imported} cookies")
             self._load_cookies()
 
         except Exception as e:
-            QMessageBox.critical(self, "Error", f"Import failed: {e}")
+            error_dialog(self, "Error", f"Import failed: {e}")
 
     def _clear_cookies(self):
         """Clear all cookies."""
-        reply = QMessageBox.question(
+        if not confirm_dialog(
             self,
             "Clear Cookies",
             "This will delete ALL cookies for this profile.\n\nYou will be logged out of all sites.\n\nContinue?",
-            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
-            QMessageBox.StandardButton.No,
-        )
-        if reply != QMessageBox.StandardButton.Yes:
+        ):
             return
 
         cookies_db = self._get_profile_dir() / "cookies.sqlite"
@@ -2005,46 +2070,40 @@ class ProfileDataDialog(QDialog):
                 conn.execute("DELETE FROM moz_cookies")
                 conn.commit()
                 conn.close()
-                QMessageBox.information(self, "Cleared", "All cookies deleted.")
+                info_dialog(self, "Cleared", "All cookies deleted.")
                 self._load_cookies()
             except Exception as e:
-                QMessageBox.critical(self, "Error", f"Failed to clear cookies: {e}")
+                error_dialog(self, "Error", f"Failed to clear cookies: {e}")
 
     def _clear_storage(self):
         """Clear localStorage and IndexedDB."""
         import shutil
 
-        reply = QMessageBox.question(
+        if not confirm_dialog(
             self,
             "Clear Storage",
             "This will delete ALL localStorage and IndexedDB data.\n\nContinue?",
-            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
-            QMessageBox.StandardButton.No,
-        )
-        if reply != QMessageBox.StandardButton.Yes:
+        ):
             return
 
         storage_dir = self._get_profile_dir() / "storage"
         if storage_dir.exists():
             try:
                 shutil.rmtree(storage_dir)
-                QMessageBox.information(self, "Cleared", "Storage data deleted.")
+                info_dialog(self, "Cleared", "Storage data deleted.")
                 self._load_storage()
             except Exception as e:
-                QMessageBox.critical(self, "Error", f"Failed to clear storage: {e}")
+                error_dialog(self, "Error", f"Failed to clear storage: {e}")
 
     def _clear_history(self):
         """Clear browsing history."""
         import sqlite3
 
-        reply = QMessageBox.question(
+        if not confirm_dialog(
             self,
             "Clear History",
             "This will delete browsing history.\n\nContinue?",
-            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
-            QMessageBox.StandardButton.No,
-        )
-        if reply != QMessageBox.StandardButton.Yes:
+        ):
             return
 
         places_db = self._get_profile_dir() / "places.sqlite"
@@ -2055,46 +2114,40 @@ class ProfileDataDialog(QDialog):
                 conn.execute("UPDATE moz_places SET visit_count = 0")
                 conn.commit()
                 conn.close()
-                QMessageBox.information(self, "Cleared", "History cleared.")
+                info_dialog(self, "Cleared", "History cleared.")
                 self._load_history()
             except Exception as e:
-                QMessageBox.critical(self, "Error", f"Failed to clear history: {e}")
+                error_dialog(self, "Error", f"Failed to clear history: {e}")
 
     def _clear_cache(self):
         """Clear browser cache."""
         import shutil
 
-        reply = QMessageBox.question(
+        if not confirm_dialog(
             self,
             "Clear Cache",
             "This will delete all cached files.\n\nContinue?",
-            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
-            QMessageBox.StandardButton.No,
-        )
-        if reply != QMessageBox.StandardButton.Yes:
+        ):
             return
 
         cache_dir = self._get_profile_dir() / "cache2"
         if cache_dir.exists():
             try:
                 shutil.rmtree(cache_dir)
-                QMessageBox.information(self, "Cleared", "Cache deleted.")
+                info_dialog(self, "Cleared", "Cache deleted.")
                 self._load_cache()
             except Exception as e:
-                QMessageBox.critical(self, "Error", f"Failed to clear cache: {e}")
+                error_dialog(self, "Error", f"Failed to clear cache: {e}")
 
     def _clear_permissions(self):
         """Clear site permissions."""
         import sqlite3
 
-        reply = QMessageBox.question(
+        if not confirm_dialog(
             self,
             "Clear Permissions",
             "This will reset all site permissions.\n\nContinue?",
-            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
-            QMessageBox.StandardButton.No,
-        )
-        if reply != QMessageBox.StandardButton.Yes:
+        ):
             return
 
         perms_db = self._get_profile_dir() / "permissions.sqlite"
@@ -2104,46 +2157,43 @@ class ProfileDataDialog(QDialog):
                 conn.execute("DELETE FROM moz_perms")
                 conn.commit()
                 conn.close()
-                QMessageBox.information(self, "Cleared", "Permissions cleared.")
+                info_dialog(self, "Cleared", "Permissions cleared.")
                 self._load_permissions()
             except Exception as e:
-                QMessageBox.critical(self, "Error", f"Failed to clear permissions: {e}")
+                error_dialog(self, "Error", f"Failed to clear permissions: {e}")
 
     def _clear_all_data(self):
         """Clear all browser data for this profile."""
         import shutil
 
-        reply = QMessageBox.question(
+        if not confirm_dialog(
             self,
-            "Clear All Data",
-            "This will delete all profile data:\n\n"
-            "- Fingerprint\n"
+            "Clear All Profile Data",
+            "This will delete ALL stored data for this profile:\n\n"
             "- Cookies\n"
-            "- Storage (localStorage/IndexedDB)\n"
+            "- Local storage\n"
             "- Browsing history\n"
             "- Cache\n"
             "- Permissions\n\n"
             "The profile will be reset to default state.\n\n"
             "Continue?",
-            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
-            QMessageBox.StandardButton.No,
-        )
-        if reply != QMessageBox.StandardButton.Yes:
+        ):
             return
+
 
         profile_dir = self._get_profile_dir()
         if profile_dir.exists():
             try:
                 shutil.rmtree(profile_dir)
                 profile_dir.mkdir(parents=True)
-                QMessageBox.information(self, "Cleared", "All profile data deleted.")
+                info_dialog(self, "Cleared", "All profile data deleted.")
                 self._refresh_all()
             except Exception as e:
-                QMessageBox.critical(self, "Error", f"Failed to clear data: {e}")
+                error_dialog(self, "Error", f"Failed to clear data: {e}")
 
     def _regenerate_fingerprint(self):
         """Delete fingerprint file so it regenerates on next launch."""
-        reply = QMessageBox.question(
+        if not confirm_dialog(
             self,
             "Regenerate Fingerprint",
             "Warning: Regenerating fingerprint while keeping cookies and storage "
@@ -2151,18 +2201,14 @@ class ProfileDataDialog(QDialog):
             "The site will see a new device with an existing session.\n\n"
             "Recommended: Clear browser data before regenerating fingerprint.\n\n"
             "Continue?",
-            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
-            QMessageBox.StandardButton.No,
-        )
-
-        if reply != QMessageBox.StandardButton.Yes:
+        ):
             return
 
         fingerprint_file = self._get_profile_dir() / "fingerprint.json"
         if fingerprint_file.exists():
             fingerprint_file.unlink()
             self._load_fingerprint()
-            QMessageBox.information(
+            info_dialog(
                 self,
                 "Fingerprint Deleted",
                 "Fingerprint deleted. A new one will be generated on next profile launch.",
