@@ -476,27 +476,14 @@ class TagsPage(QWidget):
             self.templates_table,
             [
                 (0, "fixed", Theme.COL_CHECKBOX),  # Checkbox
-                (1, "stretch", None),  # Name - fills space
-                (2, "stretch", None),  # Preview - fills space
-                (3, "fixed", Theme.COL_ACTIONS_MD),  # Actions
-            ],
-        )
-
-
-
-        # Unified table styling first
-        Theme.setup_table(self.templates_table)
-
-        # Configure columns with proper sizing
-        Theme.setup_table_columns(
-            self.templates_table,
-            [
-                (0, "fixed", Theme.COL_CHECKBOX),  # Checkbox
                 (1, "fixed", 150),  # Name
                 (2, "stretch", None),  # Preview - fills space
                 (3, "fixed", Theme.COL_ACTIONS_MD),  # Actions
             ],
         )
+
+        # Unified table styling first
+        Theme.setup_table(self.templates_table)
 
         # Header section click for select all
         self.templates_table.horizontalHeader().sectionClicked.connect(

@@ -8,6 +8,8 @@ from datetime import datetime
 from pathlib import Path
 import logging
 
+logger = logging.getLogger(__name__)
+
 # Suppress warnings
 os.environ["QT_ACCESSIBILITY"] = "0"
 os.environ["QT_LOGGING_RULES"] = "qt.accessibility.atspi=false"
@@ -929,7 +931,8 @@ class MainWindow(QMainWindow):
             if profile is not None and profile.proxy.enabled:
                 self._ping_proxy(profile)
 
-    def _batch_delete_profiles(self, profile_ids: list[str]):
+    @qasync.asyncSlot(list)
+    async def _batch_delete_profiles(self, profile_ids: list[str]):
         """Delete multiple profiles."""
         if not profile_ids:
             return
@@ -941,16 +944,18 @@ class MainWindow(QMainWindow):
             QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
         )
         if reply == QMessageBox.StandardButton.Yes:
+            # Stop running profiles first
             for pid in profile_ids:
                 profile = self._safe_get_profile(pid)
-                if profile is not None:
-                    self._stop_profile(profile)
+                if profile is not None and self.launcher.is_running(pid):
+                    await self._stop_profile(profile)
+
+            # Then delete
+            for pid in profile_ids:
                 try:
                     self.storage.delete_profile(pid)
                 except (ValueError, ProfileNotFoundError, StorageError) as e:
-                    logging.getLogger(__name__).warning(
-                        "Failed to delete profile %s: %s", pid, e
-                    )
+                    logger.warning("Failed to delete profile %s: %s", pid, e)
             self._refresh_folders()
             self._refresh_table()
             self._refresh_trash()

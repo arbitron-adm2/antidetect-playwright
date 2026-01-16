@@ -8,19 +8,9 @@ from PyQt6.QtWidgets import (
     QPushButton,
     QFrame,
     QSizePolicy,
-    QMenu,
-    QLineEdit,
-    QDialog,
-    QFormLayout,
     QComboBox,
-    QTextEdit,
-    QMessageBox,
-    QListWidget,
-    QListWidgetItem,
-    QStackedWidget,
 )
 from PyQt6.QtCore import Qt, pyqtSignal, QSize
-from PyQt6.QtGui import QFont, QAction
 
 from .models import BrowserProfile, ProfileStatus, Folder, ProxyConfig
 from .styles import COLORS, OS_ICONS

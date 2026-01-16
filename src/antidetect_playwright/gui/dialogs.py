@@ -9,7 +9,6 @@ from PyQt6.QtWidgets import (
     QComboBox,
     QListWidget,
     QListWidgetItem,
-    QMenu,
     QSpinBox,
     QTabWidget,
     QWidget,
@@ -21,7 +20,6 @@ from PyQt6.QtWidgets import (
     QGroupBox,
     QHeaderView,
     QMessageBox,
-
     QCheckBox,
     QFileDialog,
 )

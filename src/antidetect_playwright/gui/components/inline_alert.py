@@ -47,6 +47,29 @@ class InlineAlert(QFrame):
     def show_error(self, title: str, message: str) -> None:
         self._title.setText(title.strip())
         self._message.setText(message.strip())
+        self.setStyleSheet("")  # Reset to default error style
+        self._start_ttl_and_show()
+
+    def show_success(self, title: str, message: str) -> None:
+        self._title.setText(title.strip())
+        self._message.setText(message.strip())
+        # Apply success style (green border)
+        self.setStyleSheet(
+            """
+            #inlineAlert {
+                border: 1px solid #22c55e;
+                border-radius: 4px;
+                background: rgba(34, 197, 94, 0.1);
+            }
+            #inlineAlertTitle {
+                color: #22c55e;
+                font-weight: 600;
+            }
+            #inlineAlertMessage {
+                color: #22c55e;
+            }
+            """
+        )
         self._start_ttl_and_show()
 
     def hide(self) -> None:

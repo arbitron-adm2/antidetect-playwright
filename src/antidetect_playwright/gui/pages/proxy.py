@@ -512,10 +512,9 @@ class ProxyPage(QWidget):
 
         if confirm_dialog(
             self,
-            "Delete Proxy",
-            f"Delete proxy {proxy.host}:{proxy.port}?",
+            "Clear All Proxies",
+            f"Delete all {len(self.proxies)} proxies from the pool?",
         ):
-
             self.proxies.clear()
             self._refresh_table()
             self.proxy_pool_changed.emit(self.proxies)
