@@ -141,6 +141,11 @@ class BrowserLauncher:
             user_data_dir.mkdir(parents=True, exist_ok=True)
 
             proxy = profile.proxy.to_camoufox()
+            
+            # Debug: log proxy config (hide password)
+            if proxy:
+                debug_proxy = {k: (v if k != 'password' else '***') for k, v in proxy.items()}
+                logger.debug(f"Proxy config: {debug_proxy}")
 
             # Detect current IP for timezone and geolocation
             # Use Camoufox's MaxMind database for accurate timezone matching
@@ -151,15 +156,26 @@ class BrowserLauncher:
             try:
                 geoip_allowed()  # Check if geoip extra is installed
 
-                # Get public IP (through proxy if configured)
-                if proxy:
-                    proxy_str = CamoufoxProxy(**proxy).as_string()
-                    ip = public_ip(proxy_str)
-                else:
-                    ip = public_ip()
-
-                # Get geolocation from MaxMind database
-                geolocation = get_geolocation(ip)
+                # Run blocking IP/geo detection in thread pool to avoid blocking event loop
+                loop = asyncio.get_event_loop()
+                
+                async def detect_ip_and_geo():
+                    """Detect IP and geolocation in thread pool."""
+                    def _sync_detect():
+                        # Get public IP (through proxy if configured)
+                        if proxy:
+                            proxy_str = CamoufoxProxy(**proxy).as_string()
+                            ip = public_ip(proxy_str)
+                        else:
+                            ip = public_ip()
+                        
+                        # Get geolocation from MaxMind database
+                        geolocation = get_geolocation(ip)
+                        return ip, geolocation
+                    
+                    return await loop.run_in_executor(None, _sync_detect)
+                
+                ip, geolocation = await detect_ip_and_geo()
 
                 # Create geoip_info compatible object
                 class GeoIPInfoCompat:
@@ -237,6 +253,38 @@ class BrowserLauncher:
                             "browser.sessionstore.max_resumed_crashes": 0,
                         }
                     ),
+                    # Performance optimizations - hardware acceleration
+                    "gfx.webrender.all": True,  # Enable WebRender compositor
+                    "gfx.webrender.enabled": True,
+                    "gfx.webrender.software": False,  # Prefer hardware WebRender
+                    "layers.acceleration.force-enabled": True,  # Force GPU acceleration
+                    "layers.gpu-process.enabled": True,
+                    "media.hardware-video-decoding.enabled": True,  # Hardware video decode
+                    "media.ffmpeg.vaapi.enabled": True,  # VA-API for Linux
+                    # Compositor and rendering
+                    "gfx.compositor.glcontext.opaque": True,  # Faster compositing
+                    "layers.offmainthreadcomposition.enabled": True,  # Off-main-thread compositing
+                    "layers.async-pan-zoom.enabled": True,  # Smoother scrolling
+                    "apz.allow_double_tap_zooming": False,  # Disable double-tap zoom for faster response
+                    "apz.gtk.kinetic_scroll.enabled": False,  # Disable kinetic scroll (can cause lags)
+                    # Reduce paint flashing and reflows
+                    "nglayout.initialpaint.delay": 0,  # No delay for initial paint
+                    "nglayout.initialpaint.delay_in_oopif": 0,
+                    "content.notify.interval": 100000,  # Less frequent content updates
+                    # Memory and performance
+                    "browser.sessionstore.restore_tabs_lazily": True,  # Lazy load tabs
+                    "browser.sessionstore.restore_on_demand": True,
+                    "browser.tabs.unloadOnLowMemory": True,  # Unload tabs when low memory
+                    "javascript.options.mem.gc_incremental": True,  # Incremental GC
+                    "javascript.options.mem.gc_per_zone": True,
+                    # Reduce disk I/O
+                    "browser.sessionstore.interval": 60000,  # Save session every 60s instead of 15s
+                    "browser.cache.disk.smart_size.enabled": True,
+                    # Tab unloading for better multi-tab performance
+                    "browser.tabs.min_inactive_duration_before_unload": 300000,  # 5min before unload
+                    # Reduce animation overhead
+                    "ui.prefersReducedMotion": 1,  # Reduce animations
+                    "toolkit.cosmeticAnimations.enabled": False,  # Disable cosmetic animations
                 },
             }
 

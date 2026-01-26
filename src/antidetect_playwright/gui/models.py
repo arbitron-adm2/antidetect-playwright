@@ -11,6 +11,7 @@ class ProfileStatus(Enum):
     """Profile browser status."""
 
     STOPPED = "stopped"
+    STARTING = "starting"
     RUNNING = "running"
     ERROR = "error"
 

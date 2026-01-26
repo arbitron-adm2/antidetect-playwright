@@ -1,11 +1,262 @@
-"""Modal overlay helpers for in-app dialogs."""
+"""Modal popup helpers - modern inline popups instead of QMessageBox."""
 
-from PyQt6.QtCore import Qt, QEventLoop
-from PyQt6.QtWidgets import QWidget, QVBoxLayout, QMessageBox, QInputDialog, QDialog
+from PyQt6.QtWidgets import QWidget, QVBoxLayout, QHBoxLayout, QLabel, QLineEdit, QComboBox
+from PyQt6.QtCore import Qt
+
+from .popup import PopupDialog
+from .styles import COLORS
+
+
+def confirm_dialog(
+    parent,
+    title: str,
+    text: str,
+    icon=None,  # Ignored, kept for compatibility
+    default=None,  # Ignored, kept for compatibility
+    dim: bool = True,  # Ignored, kept for compatibility
+) -> bool:
+    """Show yes/no confirmation popup.
+    
+    Args:
+        parent: Parent widget
+        title: Popup title
+        text: Confirmation message
+        icon: Ignored (for compatibility)
+        default: Ignored (for compatibility)
+        dim: Ignored (for compatibility)
+    
+    Returns:
+        True if confirmed, False otherwise
+    """
+    content = QWidget()
+    layout = QVBoxLayout(content)
+    layout.setSpacing(12)
+    
+    # Message
+    message = QLabel(text)
+    message.setWordWrap(True)
+    message.setStyleSheet(f"color: {COLORS['text_primary']}; font-size: 14px;")
+    layout.addWidget(message)
+    
+    # Create popup
+    popup = PopupDialog(parent, f"⚠️ {title}")
+    popup.set_dialog_content(content)
+    
+    # Buttons
+    popup.add_spacer()
+    popup.add_button("No", popup.reject, False)
+    popup.add_button("Yes", popup.accept, True)
+    
+    return popup.exec()
+
+
+def info_dialog(parent, title: str, text: str, dim: bool = True) -> None:
+    """Show information popup.
+    
+    Args:
+        parent: Parent widget
+        title: Popup title
+        text: Information message
+        dim: Ignored (for compatibility)
+    """
+    content = QWidget()
+    layout = QVBoxLayout(content)
+    layout.setSpacing(12)
+    
+    # Message
+    message = QLabel(text)
+    message.setWordWrap(True)
+    message.setStyleSheet(f"color: {COLORS['text_primary']}; font-size: 14px;")
+    layout.addWidget(message)
+    
+    # Create popup
+    popup = PopupDialog(parent, f"ℹ️ {title}")
+    popup.set_dialog_content(content)
+    
+    # Button
+    popup.add_spacer()
+    popup.add_button("OK", popup.accept, True)
+    
+    popup.exec()
+
+
+def error_dialog(parent, title: str, text: str, dim: bool = True) -> None:
+    """Show error popup.
+    
+    Args:
+        parent: Parent widget
+        title: Popup title
+        text: Error message
+        dim: Ignored (for compatibility)
+    """
+    content = QWidget()
+    layout = QVBoxLayout(content)
+    layout.setSpacing(12)
+    
+    # Message
+    message = QLabel(text)
+    message.setWordWrap(True)
+    message.setStyleSheet(f"color: {COLORS['error']}; font-size: 14px; font-weight: 600;")
+    layout.addWidget(message)
+    
+    # Create popup
+    popup = PopupDialog(parent, f"❌ {title}")
+    popup.set_dialog_content(content)
+    
+    # Button
+    popup.add_spacer()
+    popup.add_button("OK", popup.accept, True)
+    
+    popup.exec()
+
+
+def warning_dialog(parent, title: str, text: str, dim: bool = True) -> None:
+    """Show warning popup.
+    
+    Args:
+        parent: Parent widget
+        title: Popup title
+        text: Warning message
+        dim: Ignored (for compatibility)
+    """
+    content = QWidget()
+    layout = QVBoxLayout(content)
+    layout.setSpacing(12)
+    
+    # Message
+    message = QLabel(text)
+    message.setWordWrap(True)
+    message.setStyleSheet(f"color: {COLORS['warning']}; font-size: 14px; font-weight: 600;")
+    layout.addWidget(message)
+    
+    # Create popup
+    popup = PopupDialog(parent, f"⚠️ {title}")
+    popup.set_dialog_content(content)
+    
+    # Button
+    popup.add_spacer()
+    popup.add_button("OK", popup.accept, True)
+    
+    popup.exec()
+
+
+def get_text_dialog(parent, title: str, label: str, value: str = "") -> tuple[str, bool]:
+    """Show text input popup.
+    
+    Args:
+        parent: Parent widget
+        title: Popup title
+        label: Input label
+        value: Default value
+    
+    Returns:
+        Tuple of (text, ok) where ok is True if accepted
+    """
+    content = QWidget()
+    layout = QVBoxLayout(content)
+    layout.setSpacing(12)
+    
+    # Label
+    label_widget = QLabel(label)
+    label_widget.setStyleSheet(f"color: {COLORS['text_primary']}; font-size: 14px;")
+    layout.addWidget(label_widget)
+    
+    # Input
+    text_input = QLineEdit()
+    text_input.setText(value)
+    text_input.setPlaceholderText("Enter text...")
+    layout.addWidget(text_input)
+    
+    # Create popup
+    popup = PopupDialog(parent, title)
+    popup.set_dialog_content(content)
+    
+    # Result storage
+    result_text = value
+    
+    def on_accept():
+        nonlocal result_text
+        result_text = text_input.text()
+        popup.accept()
+    
+    # Enter key accepts
+    text_input.returnPressed.connect(on_accept)
+    
+    # Buttons
+    popup.add_spacer()
+    popup.add_button("Cancel", popup.reject, False)
+    popup.add_button("OK", on_accept, True)
+    
+    ok = popup.exec()
+    return (result_text, ok)
+
+
+def get_item_dialog(
+    parent,
+    title: str,
+    label: str,
+    items: list[str],
+    current: int = 0,
+    editable: bool = False,
+) -> tuple[str, bool]:
+    """Show item selection popup.
+    
+    Args:
+        parent: Parent widget
+        title: Popup title
+        label: Selection label
+        items: List of items to choose from
+        current: Index of current item
+        editable: Whether combo box is editable
+    
+    Returns:
+        Tuple of (selected_item, ok) where ok is True if accepted
+    """
+    content = QWidget()
+    layout = QVBoxLayout(content)
+    layout.setSpacing(12)
+    
+    # Label
+    label_widget = QLabel(label)
+    label_widget.setStyleSheet(f"color: {COLORS['text_primary']}; font-size: 14px;")
+    layout.addWidget(label_widget)
+    
+    # Combo box
+    combo = QComboBox()
+    combo.addItems(items)
+    combo.setEditable(editable)
+    if 0 <= current < len(items):
+        combo.setCurrentIndex(current)
+    layout.addWidget(combo)
+    
+    # Create popup
+    popup = PopupDialog(parent, title)
+    popup.set_dialog_content(content)
+    
+    # Result storage
+    result_item = items[current] if 0 <= current < len(items) else ""
+    
+    def on_accept():
+        nonlocal result_item
+        result_item = combo.currentText()
+        popup.accept()
+    
+    # Buttons
+    popup.add_spacer()
+    popup.add_button("Cancel", popup.reject, False)
+    popup.add_button("OK", on_accept, True)
+    
+    ok = popup.exec()
+    return (result_item, ok)
+
+
+# Legacy compatibility - keep old ModalOverlay for backward compatibility
+from PyQt6.QtCore import QEventLoop
+from PyQt6.QtWidgets import QMessageBox, QInputDialog, QDialog
 
 
 class ModalOverlay(QWidget):
-    """Semi-transparent overlay used behind dialogs."""
+    """Legacy modal overlay - deprecated, use popup.py instead."""
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -43,122 +294,7 @@ class ModalOverlay(QWidget):
         self.setVisible(False)
 
 
-def _center_dialog(parent, dialog) -> None:
-    if not parent:
-        return
-    dialog.adjustSize()
-    width = dialog.width()
-    height = dialog.height()
-    x = max(0, (parent.width() - width) // 2)
-    y = max(0, (parent.height() - height) // 2)
-    dialog.move(x, y)
-
-
-def _find_overlay(widget):
-    current = widget
-    while current is not None:
-        overlay = getattr(current, "_modal_overlay", None)
-        if overlay is not None:
-            return overlay, current
-        current = current.parentWidget()
-    return None, widget.window() if widget else None
-
-
 def exec_modal(parent, dialog, dim: bool = True) -> int:
-    """Execute dialog with overlay.
-
-    Falls back to normal exec if overlay unavailable.
-    """
-    overlay, window = _find_overlay(parent)
-
-    if overlay is None or window is None:
-        return dialog.exec()
-
-    overlay.setGeometry(window.rect())
-    overlay.set_dimmed(dim)
-    overlay.set_dialog(dialog)
-    overlay.show_overlay()
-
-    loop = QEventLoop()
-    dialog.finished.connect(lambda code: (setattr(dialog, "_result_code", code), loop.quit()))
-    dialog.show()
-    loop.exec()
-    result_code = getattr(dialog, "_result_code", dialog.result())
-
-    overlay.clear_dialog()
-    overlay.hide_overlay()
-    return result_code
-
-
-def confirm_dialog(
-    parent,
-    title: str,
-    text: str,
-    icon=QMessageBox.Icon.Warning,
-    default=QMessageBox.StandardButton.No,
-    dim: bool = True,
-) -> bool:
-    """Show yes/no confirmation dialog with overlay."""
-    box = QMessageBox(parent)
-    box.setWindowTitle(title)
-    box.setText(text)
-    box.setIcon(icon)
-    box.setStandardButtons(
-        QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
-    )
-    box.setDefaultButton(default)
-    return exec_modal(parent, box, dim=dim) == QMessageBox.StandardButton.Yes
-
-
-def info_dialog(parent, title: str, text: str, dim: bool = True) -> None:
-    box = QMessageBox(parent)
-    box.setWindowTitle(title)
-    box.setText(text)
-    box.setIcon(QMessageBox.Icon.Information)
-    exec_modal(parent, box, dim=dim)
-
-
-def error_dialog(parent, title: str, text: str, dim: bool = True) -> None:
-    box = QMessageBox(parent)
-    box.setWindowTitle(title)
-    box.setText(text)
-    box.setIcon(QMessageBox.Icon.Critical)
-    exec_modal(parent, box, dim=dim)
-
-
-def warning_dialog(parent, title: str, text: str, dim: bool = True) -> None:
-    box = QMessageBox(parent)
-    box.setWindowTitle(title)
-    box.setText(text)
-    box.setIcon(QMessageBox.Icon.Warning)
-    exec_modal(parent, box, dim=dim)
-
-
-def get_text_dialog(parent, title: str, label: str, value: str = ""):
-    """Show text input dialog with overlay."""
-    dialog = QInputDialog(parent)
-    dialog.setWindowTitle(title)
-    dialog.setLabelText(label)
-    dialog.setTextValue(value)
-    ok = exec_modal(parent, dialog, dim=False) == QInputDialog.DialogCode.Accepted
-    return dialog.textValue(), ok
-
-
-def get_item_dialog(
-    parent,
-    title: str,
-    label: str,
-    items: list[str],
-    current: int = 0,
-    editable: bool = False,
-):
-    """Show item selection dialog with overlay."""
-    dialog = QInputDialog(parent)
-    dialog.setWindowTitle(title)
-    dialog.setLabelText(label)
-    dialog.setComboBoxItems(items)
-    dialog.setComboBoxEditable(editable)
-    if 0 <= current < len(items):
-        dialog.setTextValue(items[current])
-    ok = exec_modal(parent, dialog, dim=False) == QInputDialog.DialogCode.Accepted
-    return dialog.textValue(), ok
+    """Legacy exec_modal - deprecated, use PopupDialog instead."""
+    # Fallback to regular exec
+    return dialog.exec()

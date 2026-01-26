@@ -31,7 +31,7 @@ class MiniSidebar(QWidget):
         self.nav_buttons: list[QPushButton] = []
         self._settings_button: QPushButton | None = None
         self._toggle_button: QPushButton | None = None
-        self._collapsed = False
+        self._collapsed: bool | None = None  # None = not initialized yet
         self._setup_ui()
 
     def _setup_ui(self):
@@ -160,7 +160,7 @@ class MiniSidebar(QWidget):
 
     def set_collapsed(self, collapsed: bool) -> None:
         """Collapse/expand sidebar labels."""
-        if self._collapsed == collapsed:
+        if self._collapsed is not None and self._collapsed == collapsed:
             return
         self._collapsed = collapsed
 

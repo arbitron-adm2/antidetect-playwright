@@ -6,7 +6,6 @@ __pycache__/
 *$py.class
 *.so
 .Python
-build/
 develop-eggs/
 dist/
 downloads/
@@ -81,6 +80,7 @@ data/settings.json
 .env
 .env.local
 .env.*.local
+.env.example
 
 # OS
 .DS_Store
@@ -119,5 +119,13 @@ browser_state.json
 **/lock
 *.lock
 
+# Build artifacts (keep source files)
+build/output/
+*.spec.bak
+
 # Camoufox browser directory
-camoufox/
+vendor/
+sandbox/
+scripts/
+docs/
+build/

@@ -332,17 +332,29 @@ def get_stylesheet() -> str:
     QMenu {{
         background-color: {COLORS['bg_tertiary']};
         border: 1px solid {COLORS['border']};
-        border-radius: 4px;
-        padding: 4px;
+        border-radius: 8px;
+        padding: 6px;
     }}
     
     QMenu::item {{
-        padding: 8px 24px;
-        border-radius: 4px;
+        padding: 8px 12px 8px 32px;
+        border-radius: 6px;
+        margin: 2px 0;
+        font-size: 13px;
     }}
     
     QMenu::item:selected {{
-        background-color: {COLORS['accent']};
+        background-color: {COLORS['bg_hover']};
+    }}
+    
+    QMenu::icon {{
+        padding-left: 8px;
+    }}
+    
+    QMenu::separator {{
+        height: 1px;
+        background-color: {COLORS['border']};
+        margin: 6px 8px;
     }}
     
     /* ToolTip */

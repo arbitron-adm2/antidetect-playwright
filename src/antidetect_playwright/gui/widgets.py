@@ -30,18 +30,35 @@ class EmptyPlaceholder(QWidget):
         layout = QVBoxLayout(self)
         layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
 
-        # Icon
-        icon = QLabel("[browser]")
-        icon.setStyleSheet(f"font-size: 64px; color: {COLORS['accent']};")
-        icon.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        layout.addWidget(icon)
+        # Icon - use SVG
+        icon_btn = QPushButton()
+        icon_btn.setIcon(get_icon("user", 48))
+        icon_btn.setIconSize(QSize(48, 48))
+        icon_btn.setFixedSize(72, 72)
+        icon_btn.setStyleSheet(
+            f"""
+            QPushButton {{
+                background-color: {COLORS['bg_tertiary']};
+                border: 2px solid {COLORS['border']};
+                border-radius: 36px;
+            }}
+        """
+        )
+        icon_btn.setEnabled(False)
+        icon_layout = QHBoxLayout()
+        icon_layout.addStretch()
+        icon_layout.addWidget(icon_btn)
+        icon_layout.addStretch()
+        layout.addLayout(icon_layout)
+
+        layout.addSpacing(16)
 
         # Title
         title = QLabel("No profiles yet")
         title.setStyleSheet(
             f"""
             color: {COLORS['text_primary']};
-            font-size: 20px;
+            font-size: 18px;
             font-weight: 600;
         """
         )
@@ -49,29 +66,36 @@ class EmptyPlaceholder(QWidget):
         layout.addWidget(title)
 
         # Subtitle
-        subtitle = QLabel("Create browser profile to begin")
-        subtitle.setStyleSheet(f"color: {COLORS['text_muted']}; font-size: 14px;")
+        subtitle = QLabel("Create your first browser profile")
+        subtitle.setStyleSheet(f"color: {COLORS['text_secondary']}; font-size: 13px;")
         subtitle.setAlignment(Qt.AlignmentFlag.AlignCenter)
         layout.addWidget(subtitle)
 
-        layout.addSpacing(20)
+        layout.addSpacing(24)
 
-        # Create button
-        create_btn = QPushButton("+ Create Profile")
+        # Create button with icon
+        create_btn = QPushButton(" New Profile")
+        create_btn.setIcon(get_icon("plus", 14))
+        create_btn.setIconSize(QSize(14, 14))
         create_btn.setStyleSheet(
             f"""
-            background-color: {COLORS['accent']};
-            color: white;
-            border: none;
-            border-radius: 4px;
-            padding: 12px 24px;
-            font-size: 14px;
-            font-weight: 600;
+            QPushButton {{
+                background-color: {COLORS['accent']};
+                color: white;
+                border: none;
+                border-radius: 4px;
+                padding: 10px 20px;
+                font-size: 13px;
+                font-weight: 600;
+            }}
+            QPushButton:hover {{
+                background-color: {COLORS['accent_hover']};
+            }}
         """
         )
         create_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         create_btn.clicked.connect(self.create_clicked.emit)
-        create_btn.setFixedWidth(180)
+        create_btn.setFixedWidth(160)
 
         btn_layout = QHBoxLayout()
         btn_layout.addStretch()
@@ -96,17 +120,22 @@ class StatusBadge(QWidget):
 
         text = self.status.value.upper()
 
-        # Colors with subtle background
+        # Colors with improved contrast
         style_map = {
             ProfileStatus.RUNNING: {
                 "bg": "rgba(34, 197, 94, 0.15)",
                 "border": COLORS["success"],
                 "text": COLORS["success"],
             },
+            ProfileStatus.STARTING: {
+                "bg": "rgba(96, 165, 250, 0.15)",
+                "border": COLORS["info"],
+                "text": COLORS["info"],
+            },
             ProfileStatus.STOPPED: {
-                "bg": "rgba(128, 128, 128, 0.1)",
-                "border": COLORS["text_muted"],
-                "text": COLORS["text_muted"],
+                "bg": "rgba(156, 163, 175, 0.12)",
+                "border": "#9ca3af",  # text_secondary - better contrast
+                "text": "#9ca3af",
             },
             ProfileStatus.ERROR: {
                 "bg": "rgba(239, 68, 68, 0.15)",
@@ -118,8 +147,8 @@ class StatusBadge(QWidget):
             self.status,
             {
                 "bg": "transparent",
-                "border": COLORS["text_muted"],
-                "text": COLORS["text_muted"],
+                "border": "#9ca3af",
+                "text": "#9ca3af",
             },
         )
 
@@ -287,43 +316,50 @@ class ProxyWidget(QWidget):
     def _setup_ui(self):
         layout = QHBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
-        layout.setSpacing(8)
+        layout.setSpacing(6)
         layout.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
 
+        if not self.proxy or not self.proxy.enabled:
+            # Direct connection - minimal display
+            direct_label = QLabel("Direct")
+            direct_label.setStyleSheet(f"color: {COLORS['text_muted']}; font-size: 12px;")
+            layout.addWidget(direct_label)
+            layout.addStretch()
+            return
+
         # Country flag emoji
-        if self.proxy and self.proxy.country_code:
+        if self.proxy.country_code:
             flag = self._get_flag_emoji(self.proxy.country_code)
             flag_label = QLabel(flag)
-            flag_label.setStyleSheet("font-size: 16px;")
+            flag_label.setStyleSheet("font-size: 14px;")
             layout.addWidget(flag_label)
+
+        # Proxy info: show country or host:port
+        if self.proxy.country_code:
+            # Show country name or code if we have geo
+            display_text = self.proxy.country_code
+            if self.proxy.city:
+                display_text = f"{self.proxy.city}"
         else:
-            # Proxy icon when no country code
-            icon_btn = QPushButton()
-            icon_btn.setEnabled(False)
-            icon_btn.setIcon(get_icon("proxy", 14))
-            icon_btn.setIconSize(QSize(14, 14))
-            icon_btn.setFixedSize(18, 18)
-            icon_btn.setStyleSheet(
-                "QPushButton { background: transparent; border: none; padding: 0px; }"
-            )
-            layout.addWidget(icon_btn)
+            # Fallback to host:port (truncated)
+            display_text = self.proxy.display_string()
+            if len(display_text) > 20:
+                display_text = display_text[:17] + "..."
 
-        # IP/Host
-        ip_text = self.proxy.display_string() if self.proxy else "Direct"
-        ip_label = QLabel(ip_text)
-        ip_label.setStyleSheet(f"color: {COLORS['text_primary']}; font-size: 12px;")
-        layout.addWidget(ip_label)
+        info_label = QLabel(display_text)
+        info_label.setStyleSheet(f"color: {COLORS['text_primary']}; font-size: 12px;")
+        layout.addWidget(info_label)
 
-        # Ping indicator
-        if self.proxy and self.proxy.ping_ms > 0:
-            ping_color = (
-                COLORS["success"]
-                if self.proxy.ping_ms < 200
-                else (
-                    COLORS["warning"] if self.proxy.ping_ms < 500 else COLORS["error"]
-                )
-            )
-            ping_label = QLabel(f"{self.proxy.ping_ms}ms")
+        # Ping indicator with dot
+        if self.proxy.ping_ms > 0:
+            if self.proxy.ping_ms < 200:
+                ping_color = COLORS["success"]
+            elif self.proxy.ping_ms < 500:
+                ping_color = COLORS["warning"]
+            else:
+                ping_color = COLORS["error"]
+
+            ping_label = QLabel(f"• {self.proxy.ping_ms}ms")
             ping_label.setStyleSheet(f"color: {ping_color}; font-size: 11px;")
             layout.addWidget(ping_label)
 
@@ -408,6 +444,26 @@ class ProfileNameWidget(QWidget):
             )
             btn.setToolTip("Stop browser")
             btn.clicked.connect(self.stop_requested.emit)
+        elif self.profile.status == ProfileStatus.STARTING:
+            btn.setIcon(get_icon("refresh", 14))
+            btn.setIconSize(QSize(14, 14))
+            btn.setText("...")
+            btn.setStyleSheet(
+                f"""
+                QPushButton {{
+                    background-color: rgba(96, 165, 250, 0.1);
+                    color: {COLORS['info']};
+                    border: 1px solid {COLORS['info']};
+                    border-radius: 4px;
+                    padding: 0 10px 0 6px;
+                    font-size: 10px;
+                    font-weight: 700;
+                    letter-spacing: 0.5px;
+                }}
+            """
+            )
+            btn.setToolTip("Starting...")
+            btn.setEnabled(False)
         else:
             btn.setIcon(get_icon("play", 14))
             btn.setIconSize(QSize(14, 14))

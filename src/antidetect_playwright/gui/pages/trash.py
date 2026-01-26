@@ -1,5 +1,7 @@
 """Trash page for deleted profiles."""
 
+from PyQt6.QtGui import QPixmap
+
 from PyQt6.QtWidgets import (
     QWidget,
     QVBoxLayout,
@@ -17,7 +19,7 @@ from PyQt6.QtWidgets import (
 from PyQt6.QtCore import Qt, pyqtSignal, QSize
 
 from ..theme import Theme, COLORS, SPACING
-from ..icons import get_icon
+from ..icons import get_icon, ICON_TRASH, svg_icon
 from ..components import FloatingToolbar, HeaderCheckbox, CheckboxWidget
 from ..modal import confirm_dialog
 from ..table_models import SimpleTableModel
@@ -115,15 +117,44 @@ class TrashPage(QWidget):
 
         self.content_stack.addWidget(table_area)
 
-        # Empty placeholder
+        # Empty placeholder with icon
         empty_widget = QWidget()
         empty_layout = QVBoxLayout(empty_widget)
         empty_layout.addStretch()
 
+        # Trash icon in circle
+        icon_container = QWidget()
+        icon_container.setFixedSize(80, 80)
+        icon_container.setStyleSheet(f"""
+            background-color: {COLORS.bg_tertiary};
+            border-radius: 40px;
+        """)
+        icon_layout = QVBoxLayout(icon_container)
+        icon_layout.setContentsMargins(0, 0, 0, 0)
+        icon_layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        
+        icon_label = QLabel()
+        icon = svg_icon(ICON_TRASH, 32, COLORS.text_muted)
+        icon_label.setPixmap(icon.pixmap(32, 32))
+        icon_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        icon_layout.addWidget(icon_label)
+        
+        icon_wrapper = QHBoxLayout()
+        icon_wrapper.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        icon_wrapper.addWidget(icon_container)
+        empty_layout.addLayout(icon_wrapper)
+        
+        empty_layout.addSpacing(SPACING.md)
+
         self.empty_label = QLabel("Trash is empty")
-        self.empty_label.setProperty("class", "muted")
+        self.empty_label.setProperty("class", "subheading")
         self.empty_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         empty_layout.addWidget(self.empty_label)
+        
+        empty_subtitle = QLabel("Deleted profiles will appear here")
+        empty_subtitle.setProperty("class", "muted")
+        empty_subtitle.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        empty_layout.addWidget(empty_subtitle)
 
         empty_layout.addStretch()
         self.content_stack.addWidget(empty_widget)
@@ -152,7 +183,7 @@ class TrashPage(QWidget):
                 (0, "fixed", Theme.COL_CHECKBOX),  # Checkbox
                 (1, "stretch", None),  # Name - fills space
                 (2, "fixed", Theme.COL_DATE),  # Deleted At
-                (3, "fixed", Theme.COL_ACTIONS_MD),  # Actions (menu + 2 buttons)
+                (3, "fixed", Theme.COL_ACTIONS_SM),  # Actions (menu only)
             ],
         )
 
@@ -185,7 +216,7 @@ class TrashPage(QWidget):
             self.table.setColumnWidth(0, Theme.COL_CHECKBOX)
             header.setSectionResizeMode(1, QHeaderView.ResizeMode.Stretch)
             header.setSectionResizeMode(3, QHeaderView.ResizeMode.Fixed)
-            self.table.setColumnWidth(3, Theme.COL_ACTIONS_MD)
+            self.table.setColumnWidth(3, Theme.COL_ACTIONS_SM)
         else:
             Theme.setup_table_columns(
                 self.table,
@@ -193,7 +224,7 @@ class TrashPage(QWidget):
                     (0, "fixed", Theme.COL_CHECKBOX),
                     (1, "stretch", None),
                     (2, "fixed", Theme.COL_DATE),
-                    (3, "fixed", Theme.COL_ACTIONS_MD),
+                    (3, "fixed", Theme.COL_ACTIONS_SM),
                 ],
             )
 
@@ -208,10 +239,15 @@ class TrashPage(QWidget):
         if row < 0 or row >= len(self._deleted_profiles):
             return
         menu = QMenu(self)
-        restore_action = menu.addAction("Restore")
+        
+        restore_action = menu.addAction(get_icon("restore", 14), "Restore")
         restore_action.triggered.connect(lambda: self._restore_profile(row))
-        delete_action = menu.addAction("Delete permanently")
+        
+        menu.addSeparator()
+        
+        delete_action = menu.addAction(get_icon("trash", 14), "Delete permanently")
         delete_action.triggered.connect(lambda: self._permanent_delete(row))
+        
         menu.exec(global_pos)
 
     def update_deleted_profiles(self, profiles: list[dict]):
@@ -264,7 +300,7 @@ class TrashPage(QWidget):
         self.table.setIndexWidget(self.table_model.index(row, 0), checkbox)
 
     def _create_actions_widget(self, row: int) -> QWidget:
-        """Create actions widget for row."""
+        """Create actions widget for row with single menu button."""
         widget = QWidget()
         widget.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         widget.customContextMenuRequested.connect(
@@ -279,36 +315,19 @@ class TrashPage(QWidget):
 
         btn_size = Theme.BTN_ICON_SIZE
 
-        menu_btn = QPushButton("⋯")
+        # Single menu button with vertical dots
+        menu_btn = QPushButton()
+        menu_btn.setIcon(get_icon("more", 14))
+        menu_btn.setIconSize(QSize(14, 14))
         menu_btn.setFixedSize(btn_size, btn_size)
         menu_btn.setProperty("class", "icon")
-        menu_btn.setToolTip("Menu")
+        menu_btn.setToolTip("Actions")
         menu_btn.clicked.connect(
             lambda checked=False, r=row, w=menu_btn: self._show_row_context_menu(
                 r, w.mapToGlobal(w.rect().bottomLeft())
             )
         )
         layout.addWidget(menu_btn)
-
-        # Restore button
-        restore_btn = QPushButton()
-        restore_btn.setIcon(get_icon("restore", 14))
-        restore_btn.setIconSize(QSize(14, 14))
-        restore_btn.setFixedSize(btn_size, btn_size)
-        restore_btn.setProperty("class", "icon")
-        restore_btn.setToolTip("Restore")
-        restore_btn.clicked.connect(lambda: self._restore_profile(row))
-        layout.addWidget(restore_btn)
-
-        # Permanent delete button
-        del_btn = QPushButton()
-        del_btn.setIcon(get_icon("trash", 14))
-        del_btn.setIconSize(QSize(14, 14))
-        del_btn.setFixedSize(btn_size, btn_size)
-        del_btn.setProperty("class", "icon")
-        del_btn.setToolTip("Delete permanently")
-        del_btn.clicked.connect(lambda: self._permanent_delete(row))
-        layout.addWidget(del_btn)
 
         layout.addStretch()
         return widget

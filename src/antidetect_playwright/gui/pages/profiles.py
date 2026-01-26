@@ -65,7 +65,6 @@ class ProfilesPage(QWidget):
         self._selected_rows = []
         self._compact_mode = False
         self._setup_ui()
-        self._apply_responsive_columns(self.width())
 
     def _setup_ui(self):
         """Setup page UI."""
@@ -224,6 +223,7 @@ class ProfilesPage(QWidget):
         self.floating_toolbar.notes_clicked.connect(self._on_batch_notes)
         self.floating_toolbar.ping_clicked.connect(self._on_batch_ping)
         self.floating_toolbar.delete_clicked.connect(self._on_batch_delete)
+        self.floating_toolbar.visibility_changed.connect(self._on_toolbar_visibility)
         toolbar_layout.addWidget(self.floating_toolbar)
 
         table_area_layout.addWidget(
@@ -269,21 +269,23 @@ class ProfilesPage(QWidget):
         self.search_input.textChanged.connect(self.search_changed.emit)
         layout.addWidget(self.search_input)
 
-        # Quick profile button with icon
+        # Quick create button
         quick_btn = QPushButton(" Quick")
-        quick_btn.setIcon(get_icon("refresh", 14))
+        quick_btn.setIcon(get_icon("plus", 14))
         quick_btn.setIconSize(QSize(14, 14))
-        quick_btn.setToolTip("Create quick profile with random settings")
+        quick_btn.setProperty("class", "secondary")
+        quick_btn.setToolTip("Quick create profile (random settings)")
         quick_btn.clicked.connect(self.quick_create_clicked.emit)
         layout.addWidget(quick_btn)
 
-        # Create profile button with icon
-        create_btn = QPushButton(" New Profile")
-        create_btn.setIcon(get_icon("plus", 14))
-        create_btn.setIconSize(QSize(14, 14))
-        create_btn.setProperty("class", "primary")
-        create_btn.clicked.connect(self.create_profile_clicked.emit)
-        layout.addWidget(create_btn)
+        # New profile button (primary)
+        new_btn = QPushButton(" New")
+        new_btn.setIcon(get_icon("plus", 14))
+        new_btn.setIconSize(QSize(14, 14))
+        new_btn.setProperty("class", "primary")
+        new_btn.setToolTip("Create new profile (configure settings)")
+        new_btn.clicked.connect(self.create_profile_clicked.emit)
+        layout.addWidget(new_btn)
 
         return header
 
@@ -308,7 +310,7 @@ class ProfilesPage(QWidget):
                 (3, "stretch", None),  # Notes - fills space
                 (4, "stretch", None),  # Tags - fills space
                 (5, "stretch", None),  # Proxy - fills space
-                (6, "fixed", Theme.COL_ACTIONS_MD),  # Actions
+                (6, "fixed", Theme.COL_ACTIONS_SM),  # Actions - single button
             ],
         )
 
@@ -329,52 +331,14 @@ class ProfilesPage(QWidget):
         return table
 
     def resizeEvent(self, event):
-        """Handle resize for responsive columns."""
+        """Handle resize event."""
         super().resizeEvent(event)
-        self._apply_responsive_columns(event.size().width())
+        # Just reposition header checkbox on resize
+        self._position_header_checkbox()
 
     def is_compact_mode(self) -> bool:
-        """Return whether compact mode is active."""
-        return self._compact_mode
-
-    def _apply_responsive_columns(self, width: int) -> None:
-        """Show/hide columns based on available width."""
-        compact = width < 1100
-        if compact == self._compact_mode:
-            return
-
-        self._compact_mode = compact
-
-        hidden_columns = [3, 4, 5]  # Notes, Tags, Proxy
-        for col in hidden_columns:
-            self.table.setColumnHidden(col, compact)
-
-        from PyQt6.QtWidgets import QHeaderView
-
-        header = self.table.horizontalHeader()
-        if compact:
-            header.setSectionResizeMode(0, QHeaderView.ResizeMode.Fixed)
-            self.table.setColumnWidth(0, Theme.COL_CHECKBOX)
-            header.setSectionResizeMode(1, QHeaderView.ResizeMode.Stretch)
-            header.setSectionResizeMode(2, QHeaderView.ResizeMode.Fixed)
-            self.table.setColumnWidth(2, Theme.COL_STATUS)
-            header.setSectionResizeMode(6, QHeaderView.ResizeMode.Fixed)
-            self.table.setColumnWidth(6, Theme.COL_ACTIONS_MD)
-        else:
-            Theme.setup_table_columns(
-                self.table,
-                [
-                    (0, "fixed", Theme.COL_CHECKBOX),
-                    (1, "stretch", None),
-                    (2, "fixed", Theme.COL_STATUS),
-                    (3, "stretch", None),
-                    (4, "stretch", None),
-                    (5, "stretch", None),
-                    (6, "fixed", Theme.COL_ACTIONS_MD),
-                ],
-            )
-
-        self._position_header_checkbox()
+        """Return whether compact mode is active (always False now)."""
+        return False
 
     def _create_footer(self) -> QWidget:
         """Create footer with tags and pagination."""
@@ -592,6 +556,12 @@ class ProfilesPage(QWidget):
     def _on_batch_delete(self):
         """Handle batch delete."""
         self.batch_delete.emit(self.get_selected_profile_ids())
+
+    def _on_toolbar_visibility(self, visible: bool):
+        """Handle floating toolbar visibility - add/remove bottom padding."""
+        # Add padding to table when toolbar is visible to prevent overlap
+        padding = 60 if visible else 0
+        self.table_container.setContentsMargins(0, 0, 0, padding)
 
     # === Header checkbox positioning ===
 

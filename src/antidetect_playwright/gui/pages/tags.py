@@ -27,8 +27,8 @@ from ..components import (
     InlineAlert,
     make_combobox_searchable,
 )
-from ..dialogs import StatusEditDialog
-from ..modal import exec_modal, confirm_dialog, get_text_dialog
+from ..modal import confirm_dialog, get_text_dialog
+from ..dialogs_popup import show_status_edit_popup
 from ..table_models import SimpleTableModel
 
 
@@ -135,7 +135,7 @@ class TagsPage(QWidget):
             self.tags_table.horizontalHeader().setSectionResizeMode(
                 3, QHeaderView.ResizeMode.Fixed
             )
-            self.tags_table.setColumnWidth(3, Theme.COL_ACTIONS_MD)
+            self.tags_table.setColumnWidth(3, Theme.COL_ACTIONS_SM)
 
             self.statuses_table.horizontalHeader().setSectionResizeMode(
                 0, QHeaderView.ResizeMode.Fixed
@@ -147,7 +147,7 @@ class TagsPage(QWidget):
             self.statuses_table.horizontalHeader().setSectionResizeMode(
                 3, QHeaderView.ResizeMode.Fixed
             )
-            self.statuses_table.setColumnWidth(3, Theme.COL_ACTIONS_MD)
+            self.statuses_table.setColumnWidth(3, Theme.COL_ACTIONS_SM)
 
             self.templates_table.horizontalHeader().setSectionResizeMode(
                 0, QHeaderView.ResizeMode.Fixed
@@ -159,7 +159,7 @@ class TagsPage(QWidget):
             self.templates_table.horizontalHeader().setSectionResizeMode(
                 3, QHeaderView.ResizeMode.Fixed
             )
-            self.templates_table.setColumnWidth(3, Theme.COL_ACTIONS_MD)
+            self.templates_table.setColumnWidth(3, Theme.COL_ACTIONS_SM)
         else:
             Theme.setup_table_columns(
                 self.tags_table,
@@ -167,7 +167,7 @@ class TagsPage(QWidget):
                     (0, "fixed", Theme.COL_CHECKBOX),
                     (1, "stretch", None),
                     (2, "fixed", 80),
-                    (3, "fixed", Theme.COL_ACTIONS_MD),
+                    (3, "fixed", Theme.COL_ACTIONS_SM),
                 ],
             )
             Theme.setup_table_columns(
@@ -176,7 +176,7 @@ class TagsPage(QWidget):
                     (0, "fixed", Theme.COL_CHECKBOX),
                     (1, "stretch", None),
                     (2, "fixed", Theme.COL_STATUS),
-                    (3, "fixed", Theme.COL_ACTIONS_MD),
+                    (3, "fixed", Theme.COL_ACTIONS_SM),
                 ],
             )
             Theme.setup_table_columns(
@@ -185,7 +185,7 @@ class TagsPage(QWidget):
                     (0, "fixed", Theme.COL_CHECKBOX),
                     (1, "stretch", None),
                     (2, "stretch", None),
-                    (3, "fixed", Theme.COL_ACTIONS_MD),
+                    (3, "fixed", Theme.COL_ACTIONS_SM),
                 ],
             )
 
@@ -238,7 +238,7 @@ class TagsPage(QWidget):
                 (0, "fixed", Theme.COL_CHECKBOX),  # Checkbox
                 (1, "stretch", None),  # Name - fills space
                 (2, "fixed", 80),  # Profiles
-                (3, "fixed", Theme.COL_ACTIONS_MD),  # Actions
+                (3, "fixed", Theme.COL_ACTIONS_SM),  # Actions
             ],
         )
 
@@ -347,7 +347,7 @@ class TagsPage(QWidget):
                 (0, "fixed", Theme.COL_CHECKBOX),  # Checkbox
                 (1, "stretch", None),  # Name - fills space
                 (2, "fixed", Theme.COL_STATUS),  # Color
-                (3, "fixed", Theme.COL_ACTIONS_MD),  # Actions
+                (3, "fixed", Theme.COL_ACTIONS_SM),  # Actions
             ],
         )
 
@@ -478,7 +478,7 @@ class TagsPage(QWidget):
                 (0, "fixed", Theme.COL_CHECKBOX),  # Checkbox
                 (1, "fixed", 150),  # Name
                 (2, "stretch", None),  # Preview - fills space
-                (3, "fixed", Theme.COL_ACTIONS_MD),  # Actions
+                (3, "fixed", Theme.COL_ACTIONS_SM),  # Actions
             ],
         )
 
@@ -574,7 +574,7 @@ class TagsPage(QWidget):
         self._refresh_templates_table()
 
     def _create_tag_actions(self, row: int, tag: str) -> QWidget:
-        """Create actions widget for tag row."""
+        """Create actions widget for tag row with single menu button."""
         widget = QWidget()
         widget.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         widget.customContextMenuRequested.connect(
@@ -589,37 +589,19 @@ class TagsPage(QWidget):
 
         btn_size = Theme.BTN_ICON_SIZE
 
-        menu_btn = QPushButton("⋯")
+        # Single menu button with vertical dots
+        menu_btn = QPushButton()
+        menu_btn.setIcon(get_icon("more", 14))
+        menu_btn.setIconSize(QSize(14, 14))
         menu_btn.setFixedSize(btn_size, btn_size)
         menu_btn.setProperty("class", "icon")
-        menu_btn.setToolTip("Menu")
+        menu_btn.setToolTip("Actions")
         menu_btn.clicked.connect(
             lambda checked=False, t=tag, w=menu_btn: self._show_tag_context_menu(
                 t, w.mapToGlobal(w.rect().bottomLeft())
             )
         )
         layout.addWidget(menu_btn)
-
-        # Rename
-        rename_btn = QPushButton()
-        rename_btn.setIcon(get_icon("edit", 14))
-        rename_btn.setIconSize(QSize(14, 14))
-        rename_btn.setFixedSize(btn_size, btn_size)
-        rename_btn.setProperty("class", "icon")
-        rename_btn.setToolTip("Rename")
-        rename_btn.clicked.connect(lambda: self._rename_tag(tag))
-        layout.addWidget(rename_btn)
-
-        # Delete
-        del_btn = QPushButton()
-        del_btn.setIcon(get_icon("trash", 14))
-        del_btn.setIconSize(QSize(14, 14))
-        del_btn.setFixedSize(btn_size, btn_size)
-        del_btn.setProperty("class", "icon")
-        del_btn.setToolTip("Delete")
-        del_btn.clicked.connect(lambda: self._delete_tag(tag))
-        layout.addWidget(del_btn)
-
 
         layout.addStretch()
         return widget
@@ -634,10 +616,15 @@ class TagsPage(QWidget):
 
     def _show_tag_context_menu(self, tag: str, global_pos):
         menu = QMenu(self)
-        rename_action = menu.addAction("Rename")
+        
+        rename_action = menu.addAction(get_icon("edit", 14), "Rename")
         rename_action.triggered.connect(lambda: self._rename_tag(tag))
-        delete_action = menu.addAction("Delete")
+        
+        menu.addSeparator()
+        
+        delete_action = menu.addAction(get_icon("trash", 14), "Delete")
         delete_action.triggered.connect(lambda: self._delete_tag(tag))
+        
         menu.exec(global_pos)
 
     def _add_tag(self):
@@ -761,34 +748,19 @@ class TagsPage(QWidget):
 
         btn_size = Theme.BTN_ICON_SIZE
 
-        menu_btn = QPushButton("⋯")
+        # Single menu button with vertical dots
+        menu_btn = QPushButton()
+        menu_btn.setIcon(get_icon("more", 14))
+        menu_btn.setIconSize(QSize(14, 14))
         menu_btn.setFixedSize(btn_size, btn_size)
         menu_btn.setProperty("class", "icon")
-        menu_btn.setToolTip("Menu")
+        menu_btn.setToolTip("Actions")
         menu_btn.clicked.connect(
             lambda checked=False, i=idx, w=menu_btn: self._show_status_context_menu(
                 i, w.mapToGlobal(w.rect().bottomLeft())
             )
         )
         layout.addWidget(menu_btn)
-
-        edit_btn = QPushButton()
-        edit_btn.setIcon(get_icon("edit", 14))
-        edit_btn.setIconSize(QSize(14, 14))
-        edit_btn.setFixedSize(btn_size, btn_size)
-        edit_btn.setProperty("class", "icon")
-        edit_btn.setToolTip("Edit")
-        edit_btn.clicked.connect(lambda: self._edit_status(idx))
-        layout.addWidget(edit_btn)
-
-        del_btn = QPushButton()
-        del_btn.setIcon(get_icon("trash", 14))
-        del_btn.setIconSize(QSize(14, 14))
-        del_btn.setFixedSize(btn_size, btn_size)
-        del_btn.setProperty("class", "icon")
-        del_btn.setToolTip("Delete")
-        del_btn.clicked.connect(lambda: self._delete_status(idx))
-        layout.addWidget(del_btn)
 
         layout.addStretch()
         return widget
@@ -805,19 +777,24 @@ class TagsPage(QWidget):
 
     def _show_status_context_menu(self, idx: int, global_pos):
         menu = QMenu(self)
-        edit_action = menu.addAction("Edit")
+        
+        edit_action = menu.addAction(get_icon("edit", 14), "Edit")
         edit_action.triggered.connect(lambda: self._edit_status(idx))
-        delete_action = menu.addAction("Delete")
+        
+        menu.addSeparator()
+        
+        delete_action = menu.addAction(get_icon("trash", 14), "Delete")
         delete_action.triggered.connect(lambda: self._delete_status(idx))
+        
         menu.exec(global_pos)
 
     def _edit_status(self, idx: int):
         """Edit custom status."""
         if 0 <= idx < len(self.statuses):
             name, color = self.statuses[idx]
-            dialog = StatusEditDialog(name, color, self)
-            if exec_modal(self, dialog):
-                new_name, new_color = dialog.get_values()
+            result = show_status_edit_popup(self, name, color)
+            if result:
+                new_name, new_color = result
                 if new_name:
                     old_name = name
                     self.statuses[idx] = (new_name, new_color)
@@ -872,7 +849,7 @@ class TagsPage(QWidget):
             )
 
     def _create_template_actions(self, idx: int) -> QWidget:
-        """Create actions for template."""
+        """Create actions for template with single menu button."""
         widget = QWidget()
         widget.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         widget.customContextMenuRequested.connect(
@@ -887,39 +864,19 @@ class TagsPage(QWidget):
 
         btn_size = Theme.BTN_ICON_SIZE
 
-        menu_btn = QPushButton("⋯")
+        # Single menu button with vertical dots
+        menu_btn = QPushButton()
+        menu_btn.setIcon(get_icon("more", 14))
+        menu_btn.setIconSize(QSize(14, 14))
         menu_btn.setFixedSize(btn_size, btn_size)
         menu_btn.setProperty("class", "icon")
-        menu_btn.setToolTip("Menu")
+        menu_btn.setToolTip("Actions")
         menu_btn.clicked.connect(
             lambda checked=False, i=idx, w=menu_btn: self._show_template_context_menu(
                 i, w.mapToGlobal(w.rect().bottomLeft())
             )
         )
         layout.addWidget(menu_btn)
-
-        # Edit
-        edit_btn = QPushButton()
-        edit_btn.setIcon(get_icon("edit", 14))
-        edit_btn.setIconSize(QSize(14, 14))
-        edit_btn.setFixedSize(btn_size, btn_size)
-        edit_btn.setProperty("class", "icon")
-        edit_btn.setToolTip("Edit")
-        edit_btn.clicked.connect(lambda: self._edit_template(idx))
-        layout.addWidget(edit_btn)
-
-        # Delete
-        del_btn = QPushButton()
-        del_btn.setIcon(get_icon("trash", 14))
-        del_btn.setIconSize(QSize(14, 14))
-        del_btn.setFixedSize(btn_size, btn_size)
-        del_btn.setProperty("class", "icon")
-        del_btn.setToolTip("Delete")
-        del_btn.clicked.connect(lambda: self._delete_template(idx))
-        layout.addWidget(del_btn)
-
-
-
 
         layout.addStretch()
         return widget
@@ -933,10 +890,15 @@ class TagsPage(QWidget):
 
     def _show_template_context_menu(self, idx: int, global_pos):
         menu = QMenu(self)
-        edit_action = menu.addAction("Edit")
+        
+        edit_action = menu.addAction(get_icon("edit", 14), "Edit")
         edit_action.triggered.connect(lambda: self._edit_template(idx))
-        delete_action = menu.addAction("Delete")
+        
+        menu.addSeparator()
+        
+        delete_action = menu.addAction(get_icon("trash", 14), "Delete")
         delete_action.triggered.connect(lambda: self._delete_template(idx))
+        
         menu.exec(global_pos)
 
     def _edit_template(self, idx: int):

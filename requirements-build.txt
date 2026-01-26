@@ -1,0 +1,6 @@
+# Build and packaging dependencies
+# Install with: pip install -r requirements-build.txt
+
+PyInstaller>=6.11.0
+pillow>=11.0.0
+cairosvg>=2.7.0

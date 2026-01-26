@@ -14,6 +14,9 @@ logger = logging.getLogger(__name__)
 os.environ["QT_ACCESSIBILITY"] = "0"
 os.environ["QT_LOGGING_RULES"] = "qt.accessibility.atspi=false"
 warnings.filterwarnings("ignore", category=UserWarning, module="urllib3")
+# Suppress Camoufox LeakWarning - we handle geoip ourselves
+warnings.filterwarnings("ignore", message=".*geoip=True.*")
+warnings.filterwarnings("ignore", category=Warning, module="camoufox")
 
 from PyQt6.QtWidgets import (
     QApplication,
@@ -22,7 +25,6 @@ from PyQt6.QtWidgets import (
     QVBoxLayout,
     QHBoxLayout,
     QPushButton,
-    QMessageBox,
     QMenu,
     QStackedWidget,
 )
@@ -42,16 +44,17 @@ from .widgets import (
     ProxyWidget,
     ProfileNameWidget,
 )
-from .dialogs import (
-    ProfileDialog,
-    QuickProfileDialog,
-    FolderDialog,
-    TagsEditDialog,
-    NotesEditDialog,
-    ProxyPoolDialog,
-    SettingsDialog,
-    ProfileDataDialog,
+from .dialogs import ProfileDataDialog
+from .dialogs_popup import (
+    show_profile_popup,
+    show_quick_profile_popup,
+    show_folder_popup,
+    show_tags_edit_popup,
+    show_notes_edit_popup,
+    show_proxy_pool_popup,
+    show_settings_popup,
 )
+from .modal import confirm_dialog, info_dialog
 from .proxy_utils import ping_proxy, detect_proxy_geo
 from .components import MiniSidebar
 from .pages import ProfilesPage, ProxyPage, TagsPage, TrashPage
@@ -378,7 +381,7 @@ class MainWindow(QMainWindow):
             )
             table.setIndexWidget(self.profiles_page.table_model.index(row, 5), proxy_widget)
 
-            # Actions (index 6)
+            # Actions (index 6) - single menu button
             actions_widget = QWidget()
             actions_widget.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
             actions_widget.customContextMenuRequested.connect(
@@ -387,47 +390,22 @@ class MainWindow(QMainWindow):
                 )
             )
             actions_layout = QHBoxLayout(actions_widget)
-            actions_layout.setContentsMargins(4, 0, 4, 0)
-            actions_layout.setSpacing(4)
-            actions_layout.setAlignment(Qt.AlignmentFlag.AlignVCenter)
+            actions_layout.setContentsMargins(8, 0, 8, 0)
+            actions_layout.setSpacing(0)
+            actions_layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
 
-            btn_size = Theme.BTN_ICON_SIZE
-
-            menu_btn = QPushButton("⋯")
-            menu_btn.setFixedSize(btn_size, btn_size)
+            menu_btn = QPushButton()
+            menu_btn.setIcon(get_icon("more", 16))
+            menu_btn.setIconSize(QSize(16, 16))
+            menu_btn.setFixedSize(28, 28)
             menu_btn.setProperty("class", "icon")
-            menu_btn.setToolTip("Menu")
+            menu_btn.setToolTip("Actions")
             menu_btn.clicked.connect(
                 lambda checked=False, p=profile, w=menu_btn: self._show_profile_context_menu(
                     p, w.mapToGlobal(w.rect().bottomLeft())
                 )
             )
             actions_layout.addWidget(menu_btn)
-
-            ping_btn = QPushButton()
-            ping_btn.setIcon(get_icon("ping", 14))
-            ping_btn.setIconSize(QSize(14, 14))
-            ping_btn.setFixedSize(btn_size, btn_size)
-            ping_btn.setProperty("class", "icon")
-            ping_btn.setToolTip("Ping")
-            ping_btn.clicked.connect(
-                lambda checked=False, p=profile: self._ping_proxy(p)
-            )
-            ping_btn.setEnabled(bool(profile.proxy and profile.proxy.enabled))
-            actions_layout.addWidget(ping_btn)
-
-            change_btn = QPushButton()
-            change_btn.setIcon(get_icon("swap", 14))
-            change_btn.setIconSize(QSize(14, 14))
-            change_btn.setFixedSize(btn_size, btn_size)
-            change_btn.setProperty("class", "icon")
-            change_btn.setToolTip("Quick change proxy")
-            change_btn.clicked.connect(
-                lambda checked=False, p=profile: self._quick_change_proxy(p)
-            )
-            actions_layout.addWidget(change_btn)
-
-            actions_layout.addStretch()
             table.setIndexWidget(self.profiles_page.table_model.index(row, 6), actions_widget)
 
         # Keep toolbar + header checkbox state consistent after rebuild
@@ -498,9 +476,9 @@ class MainWindow(QMainWindow):
 
     def _create_profile(self):
         """Open profile creation dialog."""
-        dialog = ProfileDialog(storage=self.storage, parent=self)
-        if dialog.exec():
-            profile = dialog.get_profile()
+        result = show_profile_popup(self, storage=self.storage)
+        if result:
+            profile, should_regenerate = result
             profile.folder_id = self.current_folder
             self.storage.add_profile(profile)
             self._refresh_table()
@@ -508,9 +486,8 @@ class MainWindow(QMainWindow):
 
     def _quick_create_profile(self):
         """Quick profile creation."""
-        dialog = QuickProfileDialog(parent=self)
-        if dialog.exec():
-            profile = dialog.get_profile()
+        profile = show_quick_profile_popup(self)
+        if profile:
             profile.folder_id = self.current_folder
             self.storage.add_profile(profile)
             self._refresh_table()
@@ -518,16 +495,14 @@ class MainWindow(QMainWindow):
 
     def _create_folder(self):
         """Create new folder."""
-        dialog = FolderDialog(parent=self)
-        if dialog.exec():
-            folder = dialog.get_folder()
+        folder = show_folder_popup(self)
+        if folder:
             self.storage.add_folder(folder)
             self._refresh_folders()
 
     def _show_settings(self):
         """Show settings dialog."""
-        dialog = SettingsDialog(self.settings, parent=self)
-        if dialog.exec():
+        if show_settings_popup(self, self.settings):
             # Save updated settings (settings object is modified in-place)
             self.storage.save_settings()
             # Settings will be applied on next browser launch
@@ -550,20 +525,18 @@ class MainWindow(QMainWindow):
             (f for f in self.storage.get_folders() if f.id == folder_id), None
         )
         if folder:
-            dialog = FolderDialog(folder, parent=self)
-            if dialog.exec():
-                self.storage.update_folder(dialog.get_folder())
+            updated = show_folder_popup(self, folder)
+            if updated:
+                self.storage.update_folder(updated)
                 self._refresh_folders()
 
     def _delete_folder(self, folder_id: str):
         """Delete folder."""
-        reply = QMessageBox.question(
+        if confirm_dialog(
             self,
             "Delete Folder",
             "Delete this folder? Profiles will be moved to All Profiles.",
-            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
-        )
-        if reply == QMessageBox.StandardButton.Yes:
+        ):
             self.storage.delete_folder(folder_id)
             if self.current_folder == folder_id:
                 self.current_folder = ""
@@ -587,28 +560,38 @@ class MainWindow(QMainWindow):
 
         running = self.launcher.is_running(profile.id)
         if running:
-            stop_action = menu.addAction("Stop")
+            stop_action = menu.addAction(get_icon("stop", 14), "Stop")
             stop_action.triggered.connect(lambda: self._stop_profile(profile))
         else:
-            start_action = menu.addAction("Start")
+            start_action = menu.addAction(get_icon("play", 14), "Start")
             start_action.triggered.connect(lambda: self._start_profile(profile))
 
         menu.addSeparator()
 
-        edit_action = menu.addAction("Edit")
+        edit_action = menu.addAction(get_icon("edit", 14), "Edit")
         edit_action.triggered.connect(lambda: self._edit_profile(profile))
 
         # View Profile Data (fingerprint, cookies, storage, etc.)
-        data_action = menu.addAction("View Profile Data")
+        data_action = menu.addAction(get_icon("user", 14), "View Profile Data")
         data_action.triggered.connect(lambda: self._view_fingerprint(profile))
 
-        duplicate_action = menu.addAction("Duplicate")
+        duplicate_action = menu.addAction(get_icon("copy", 14), "Duplicate")
         duplicate_action.triggered.connect(lambda: self._duplicate_profile(profile))
 
         menu.addSeparator()
 
+        # Proxy actions
+        if profile.proxy and profile.proxy.enabled:
+            ping_action = menu.addAction(get_icon("ping", 14), "Ping Proxy")
+            ping_action.triggered.connect(lambda: self._ping_proxy(profile))
+
+        change_proxy_action = menu.addAction(get_icon("swap", 14), "Change Proxy")
+        change_proxy_action.triggered.connect(lambda: self._quick_change_proxy(profile))
+
+        menu.addSeparator()
+
         # Move to folder submenu
-        move_menu = menu.addMenu("Move to Folder")
+        move_menu = menu.addMenu(get_icon("folder", 14), "Move to Folder")
 
         # Root folder option
         root_action = move_menu.addAction("All Profiles")
@@ -632,7 +615,7 @@ class MainWindow(QMainWindow):
 
         menu.addSeparator()
 
-        delete_action = menu.addAction("Delete")
+        delete_action = menu.addAction(get_icon("trash", 14), "Delete")
         delete_action.triggered.connect(lambda: self._delete_profile(profile))
 
         menu.exec(pos)
@@ -645,12 +628,12 @@ class MainWindow(QMainWindow):
 
     def _edit_profile(self, profile: BrowserProfile):
         """Edit profile."""
-        dialog = ProfileDialog(profile, storage=self.storage, parent=self)
-        if dialog.exec():
-            updated_profile = dialog.get_profile()
+        result = show_profile_popup(self, profile, storage=self.storage)
+        if result:
+            updated_profile, should_regenerate = result
 
             # If regenerate was requested, delete fingerprint.json
-            if dialog.should_regenerate():
+            if should_regenerate:
                 data_dir = self.storage.get_browser_data_dir()
                 fingerprint_file = data_dir / updated_profile.id / "fingerprint.json"
                 if fingerprint_file.exists():
@@ -681,13 +664,11 @@ class MainWindow(QMainWindow):
 
     def _delete_profile(self, profile: BrowserProfile):
         """Delete profile."""
-        reply = QMessageBox.question(
+        if confirm_dialog(
             self,
             "Delete Profile",
             f"Delete profile '{profile.name}'?",
-            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
-        )
-        if reply == QMessageBox.StandardButton.Yes:
+        ):
             if self.launcher.is_running(profile.id):
                 self._do_stop_profile(profile.id)
             self.storage.delete_profile(profile.id)
@@ -704,13 +685,22 @@ class MainWindow(QMainWindow):
     @qasync.asyncSlot(object)
     async def _start_profile(self, profile: BrowserProfile):
         """Start browser for profile."""
-        profile.last_used = datetime.now()
-        self.storage.update_profile(profile)
-
         if self.launcher.is_running(profile.id):
             return
+        if profile.status == ProfileStatus.STARTING:
+            return
+
+        # Set STARTING status immediately for visual feedback
+        profile.status = ProfileStatus.STARTING
+        profile.last_used = datetime.now()
+        self.storage.update_profile(profile)
+        self._refresh_table()
+
         success = await self.launcher.launch_profile(profile)
-        if success:
+        if not success:
+            # Reset to stopped on failure
+            profile.status = ProfileStatus.STOPPED
+            self.storage.update_profile(profile)
             self._refresh_table()
 
     @qasync.asyncSlot(object)
@@ -748,22 +738,22 @@ class MainWindow(QMainWindow):
 
     def _edit_notes(self, profile: BrowserProfile):
         """Edit profile notes."""
-        dialog = NotesEditDialog(
+        notes = show_notes_edit_popup(
+            self,
             profile.notes,
             note_templates=self.storage.get_note_templates_pool(),
-            parent=self,
         )
-        if dialog.exec():
-            profile.notes = dialog.get_notes()
+        if notes is not None:
+            profile.notes = notes
             self.storage.update_profile(profile)
             self._refresh_table()
 
     def _edit_tags(self, profile: BrowserProfile):
         """Edit profile tags."""
         all_tags = self.storage.get_all_tags()
-        dialog = TagsEditDialog(profile.tags, all_tags, parent=self)
-        if dialog.exec():
-            profile.tags = dialog.get_tags()
+        tags = show_tags_edit_popup(self, profile.tags, all_tags)
+        if tags is not None:
+            profile.tags = tags
             self.storage.update_profile(profile)
             self._refresh_table()
             self._refresh_tags()
@@ -798,7 +788,7 @@ class MainWindow(QMainWindow):
             self.storage.update_profile(profile)
             self._refresh_table()
         else:
-            QMessageBox.information(
+            info_dialog(
                 self,
                 "Proxy Pool Empty",
                 "No proxies in pool. Add proxies via Proxy Pool button.",
@@ -807,9 +797,9 @@ class MainWindow(QMainWindow):
     def _open_proxy_pool(self):
         """Open proxy pool dialog."""
         pool = self.storage.get_proxy_pool()
-        dialog = ProxyPoolDialog(pool.proxies, parent=self)
-        if dialog.exec():
-            self.storage.set_proxy_pool(dialog.get_proxies())
+        proxies = show_proxy_pool_popup(self, pool.proxies)
+        if proxies is not None:
+            self.storage.set_proxy_pool(proxies)
 
     def _on_proxy_pool_changed(self, proxies: list):
         """Handle proxy pool changes from proxy page."""
@@ -869,18 +859,43 @@ class MainWindow(QMainWindow):
     # === Batch operations ===
 
     def _batch_start_profiles(self, profile_ids: list[str]):
-        """Start multiple profiles."""
-        for pid in profile_ids:
-            profile = self._safe_get_profile(pid)
-            if profile is not None:
-                self._start_profile(profile)
+        """Start multiple profiles in parallel with limit."""
+        async def start_all():
+            """Start all profiles concurrently with concurrency limit."""
+            # Limit concurrent starts to avoid system overload
+            semaphore = asyncio.Semaphore(5)  # Max 5 simultaneous starts
+            
+            async def start_one(profile):
+                async with semaphore:
+                    await self._start_profile(profile)
+            
+            tasks = []
+            for pid in profile_ids:
+                profile = self._safe_get_profile(pid)
+                if profile is not None:
+                    tasks.append(start_one(profile))
+            
+            if tasks:
+                # Wait for all profiles to start (or fail) concurrently
+                await asyncio.gather(*tasks, return_exceptions=True)
+        
+        # Spawn the batch start as a background task
+        self._spawn_task(start_all(), context="batch_start_profiles")
 
     def _batch_stop_profiles(self, profile_ids: list[str]):
-        """Stop multiple profiles."""
-        for pid in profile_ids:
-            profile = self._safe_get_profile(pid)
-            if profile is not None:
-                self._stop_profile(profile)
+        """Stop multiple profiles in parallel."""
+        async def stop_all():
+            """Stop all profiles concurrently."""
+            tasks = []
+            for pid in profile_ids:
+                profile = self._safe_get_profile(pid)
+                if profile is not None:
+                    tasks.append(self._stop_profile(profile))
+            
+            if tasks:
+                await asyncio.gather(*tasks, return_exceptions=True)
+        
+        self._spawn_task(stop_all(), context="batch_stop_profiles")
 
     def _batch_tag_profiles(self, profile_ids: list[str]):
         """Set tags for multiple profiles."""
@@ -893,9 +908,8 @@ class MainWindow(QMainWindow):
         if not profiles:
             return
 
-        dialog = TagsEditDialog(profiles[0].tags, self.storage.get_all_tags(), self)
-        if dialog.exec():
-            new_tags = dialog.get_tags()
+        new_tags = show_tags_edit_popup(self, profiles[0].tags, self.storage.get_all_tags())
+        if new_tags is not None:
             for profile in profiles:
                 profile.tags = new_tags
                 self.storage.update_profile(profile)
@@ -912,24 +926,31 @@ class MainWindow(QMainWindow):
         if not profiles:
             return
 
-        dialog = NotesEditDialog(
+        new_notes = show_notes_edit_popup(
+            self,
             "",
             note_templates=self.storage.get_note_templates_pool(),
-            parent=self,
         )
-        if dialog.exec():
-            new_notes = dialog.get_notes()
+        if new_notes is not None:
             for profile in profiles:
                 profile.notes = new_notes
                 self.storage.update_profile(profile)
             self._refresh_table()
 
     def _batch_ping_profiles(self, profile_ids: list[str]):
-        """Ping proxies for multiple profiles."""
-        for pid in profile_ids:
-            profile = self._safe_get_profile(pid)
-            if profile is not None and profile.proxy.enabled:
-                self._ping_proxy(profile)
+        """Ping proxies for multiple profiles in parallel."""
+        async def ping_all():
+            """Ping all profile proxies concurrently."""
+            tasks = []
+            for pid in profile_ids:
+                profile = self._safe_get_profile(pid)
+                if profile is not None and profile.proxy.enabled:
+                    tasks.append(self._ping_proxy(profile))
+            
+            if tasks:
+                await asyncio.gather(*tasks, return_exceptions=True)
+        
+        self._spawn_task(ping_all(), context="batch_ping_profiles")
 
     @qasync.asyncSlot(list)
     async def _batch_delete_profiles(self, profile_ids: list[str]):
@@ -937,13 +958,11 @@ class MainWindow(QMainWindow):
         if not profile_ids:
             return
 
-        reply = QMessageBox.question(
+        if confirm_dialog(
             self,
             "Delete Profiles",
             f"Delete {len(profile_ids)} selected profiles?",
-            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
-        )
-        if reply == QMessageBox.StandardButton.Yes:
+        ):
             # Stop running profiles first
             for pid in profile_ids:
                 profile = self._safe_get_profile(pid)
@@ -1002,16 +1021,19 @@ class MainWindow(QMainWindow):
             )
 
     async def _do_batch_ping_proxies(self, proxies: list):
-        """Perform batch proxy ping."""
+        """Perform batch proxy ping with concurrency limit."""
+        # Limit concurrent pings to avoid overwhelming network
+        semaphore = asyncio.Semaphore(10)  # Max 10 simultaneous pings
 
         async def ping_one(proxy) -> None:
-            ping_ms = await ping_proxy(proxy)
-            proxy.ping_ms = ping_ms
-            if ping_ms > 0 and not proxy.country_code:
-                geo = await detect_proxy_geo(proxy)
-                if geo:
-                    proxy.country_code = geo.get("country_code", "")
-                    proxy.country_name = geo.get("country_name", "")
+            async with semaphore:
+                ping_ms = await ping_proxy(proxy)
+                proxy.ping_ms = ping_ms
+                if ping_ms > 0 and not proxy.country_code:
+                    geo = await detect_proxy_geo(proxy)
+                    if geo:
+                        proxy.country_code = geo.get("country_code", "")
+                        proxy.country_name = geo.get("country_name", "")
 
         tasks = [ping_one(p) for p in proxies]
         await asyncio.gather(*tasks, return_exceptions=True)
@@ -1022,13 +1044,11 @@ class MainWindow(QMainWindow):
         if not indices:
             return
 
-        reply = QMessageBox.question(
+        if confirm_dialog(
             self,
             "Delete Proxies",
             f"Delete {len(indices)} selected proxies?",
-            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
-        )
-        if reply == QMessageBox.StandardButton.Yes:
+        ):
             proxies = self.proxy_page.get_proxies()
             # Remove from highest index first to preserve indices
             for idx in sorted(indices, reverse=True):
@@ -1045,13 +1065,11 @@ class MainWindow(QMainWindow):
         if not tag_names:
             return
 
-        reply = QMessageBox.question(
+        if confirm_dialog(
             self,
             "Delete Tags",
             f"Delete {len(tag_names)} selected tags?",
-            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
-        )
-        if reply == QMessageBox.StandardButton.Yes:
+        ):
             for tag in tag_names:
                 self.storage.remove_tag_from_pool(tag)
                 for profile in self.storage.get_profiles():
@@ -1067,13 +1085,11 @@ class MainWindow(QMainWindow):
         if not status_names:
             return
 
-        reply = QMessageBox.question(
+        if confirm_dialog(
             self,
             "Delete Statuses",
             f"Delete {len(status_names)} selected statuses?",
-            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
-        )
-        if reply == QMessageBox.StandardButton.Yes:
+        ):
             for name in status_names:
                 self.storage.remove_status_from_pool(name)
             self.tags_page.update_statuses(self.storage.get_statuses_pool())
@@ -1084,17 +1100,28 @@ class MainWindow(QMainWindow):
         if not template_names:
             return
 
-        reply = QMessageBox.question(
+        if confirm_dialog(
             self,
             "Delete Templates",
             f"Delete {len(template_names)} selected templates?",
-            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
-        )
-        if reply == QMessageBox.StandardButton.Yes:
+        ):
             for name in template_names:
                 self.storage.remove_note_template_from_pool(name)
             self.tags_page.update_note_templates(self.storage.get_note_templates_pool())
             self.tags_page._deselect_all_templates()
+
+    def resizeEvent(self, event):
+        """Handle window resize with auto-collapse sidebar."""
+        super().resizeEvent(event)
+        
+        # Auto-collapse sidebar when window width is less than 1400px
+        # Auto-expand when window width is more than 1500px (with hysteresis)
+        width = event.size().width()
+        
+        if width < 1400 and not self.mini_sidebar._collapsed:
+            self.mini_sidebar.set_collapsed(True)
+        elif width > 1500 and self.mini_sidebar._collapsed:
+            self.mini_sidebar.set_collapsed(False)
 
     def closeEvent(self, event):
         """Handle window close with graceful browser shutdown."""
