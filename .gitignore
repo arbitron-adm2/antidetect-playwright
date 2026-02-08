@@ -45,6 +45,24 @@ env/
 .claude/
 .docs/
 
+# GitHub workflows and configs (if not needed in repo)
+.github/
+
+# Build scripts and artifacts
+build/
+
+# Packaging files
+debian/
+
+# Automation scripts
+scripts/
+
+# Tests
+tests/
+
+# Migration script
+migrate_data.py
+
 # Git account switcher (contains tokens)
 git-switch-account.sh
 
@@ -240,6 +258,3 @@ node_modules/
 # Backup files
 *.backup
 *~
-tests
-assets/icons/README.md
-migrate_data.py
