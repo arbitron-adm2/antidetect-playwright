@@ -45,9 +45,8 @@ class ProxyPage(QWidget):
         self.proxies: list[ProxyConfig] = []
         self._selected_rows = []
         self._header_checked = False
-        self._compact_mode = False
+        # Removed _compact_mode - no longer hiding columns on resize
         self._setup_ui()
-        self._apply_responsive_columns(self.width())
 
     def _setup_ui(self):
         """Setup page UI."""
@@ -208,50 +207,9 @@ class ProxyPage(QWidget):
 
         return table
 
-    def resizeEvent(self, event):
-        """Handle resize for responsive columns."""
-        super().resizeEvent(event)
-        self._apply_responsive_columns(event.size().width())
-
-    def _apply_responsive_columns(self, width: int) -> None:
-        """Show/hide columns based on available width."""
-        compact = width < 1050
-        if compact == self._compact_mode:
-            return
-
-        self._compact_mode = compact
-
-        hidden_columns = [4, 5, 6]  # Auth, Country, Ping
-        for col in hidden_columns:
-            self.table.setColumnHidden(col, compact)
-
-        from PyQt6.QtWidgets import QHeaderView
-
-        header = self.table.horizontalHeader()
-        if compact:
-            header.setSectionResizeMode(0, QHeaderView.ResizeMode.Fixed)
-            self.table.setColumnWidth(0, Theme.COL_CHECKBOX)
-            header.setSectionResizeMode(1, QHeaderView.ResizeMode.Fixed)
-            self.table.setColumnWidth(1, 70)
-            header.setSectionResizeMode(2, QHeaderView.ResizeMode.Stretch)
-            header.setSectionResizeMode(3, QHeaderView.ResizeMode.Fixed)
-            self.table.setColumnWidth(3, 70)
-            header.setSectionResizeMode(7, QHeaderView.ResizeMode.Fixed)
-            self.table.setColumnWidth(7, Theme.COL_ACTIONS_LG)
-        else:
-            Theme.setup_table_columns(
-                self.table,
-                [
-                    (0, "fixed", Theme.COL_CHECKBOX),
-                    (1, "fixed", 70),
-                    (2, "stretch", None),
-                    (3, "fixed", 70),
-                    (4, "fixed", 60),
-                    (5, "fixed", 80),
-                    (6, "fixed", 80),
-                    (7, "fixed", Theme.COL_ACTIONS_LG),
-                ],
-            )
+    # Removed resizeEvent and _apply_responsive_columns
+    # Table columns are now configured once with proper sizing modes
+    # The Stretch mode for Host column ensures table scales correctly without hiding columns
 
     def _on_context_menu(self, pos):
         index = self.table.indexAt(pos)

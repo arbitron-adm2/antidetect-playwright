@@ -64,7 +64,31 @@ class SecurePasswordEncryption:
         # Save to file
         try:
             key_file.write_bytes(derived_key)
-            key_file.chmod(0o600)  # Only owner can read
+            # Set restrictive permissions (POSIX only)
+            try:
+                import stat
+                import sys
+
+                if sys.platform != 'win32':
+                    # Unix/Linux/macOS: owner read/write only
+                    key_file.chmod(stat.S_IRUSR | stat.S_IWUSR)
+                else:
+                    # Windows: use icacls for restrictive ACL
+                    import subprocess
+                    try:
+                        # Remove inheritance and grant access only to current user
+                        subprocess.run(
+                            ['icacls', str(key_file), '/inheritance:r', '/grant:r',
+                             f'{os.environ.get("USERNAME", "CURRENT_USER")}:F'],
+                            capture_output=True,
+                            check=False  # Don't fail if icacls unavailable
+                        )
+                    except (FileNotFoundError, subprocess.SubprocessError):
+                        # icacls not available, skip permission setting
+                        logger.warning("icacls not available on Windows, key file permissions not restricted")
+            except Exception as perm_error:
+                logger.warning(f"Could not set restrictive permissions on key file: {perm_error}")
+
             logger.info(f"Encryption key saved to {key_file}")
         except Exception as e:
             logger.error(f"Failed to save encryption key: {e}")

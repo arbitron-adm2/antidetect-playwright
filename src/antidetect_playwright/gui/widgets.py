@@ -110,7 +110,65 @@ class StatusBadge(QWidget):
     def __init__(self, status: ProfileStatus, parent=None):
         super().__init__(parent)
         self.status = status
+        self._label = None  # Store reference for updates
         self._setup_ui()
+
+    def update_status(self, new_status: ProfileStatus):
+        """Update status without recreating widget (performance optimization).
+
+        Args:
+            new_status: New status to display
+        """
+        if self.status == new_status:
+            return
+
+        self.status = new_status
+        if self._label:
+            # Update existing label instead of rebuilding
+            text = self.status.value.upper()
+            style_map = {
+                ProfileStatus.RUNNING: {
+                    "bg": "rgba(34, 197, 94, 0.15)",
+                    "border": COLORS["success"],
+                    "text": COLORS["success"],
+                },
+                ProfileStatus.STARTING: {
+                    "bg": "rgba(96, 165, 250, 0.15)",
+                    "border": COLORS["info"],
+                    "text": COLORS["info"],
+                },
+                ProfileStatus.STOPPED: {
+                    "bg": "rgba(209, 213, 219, 0.12)",
+                    "border": COLORS["text_secondary"],
+                    "text": COLORS["text_secondary"],
+                },
+                ProfileStatus.ERROR: {
+                    "bg": "rgba(239, 68, 68, 0.15)",
+                    "border": COLORS["error"],
+                    "text": COLORS["error"],
+                },
+            }
+            style = style_map.get(
+                self.status,
+                {
+                    "bg": "transparent",
+                    "border": "#9ca3af",
+                    "text": "#9ca3af",
+                },
+            )
+            self._label.setText(text)
+            self._label.setStyleSheet(
+                f"""
+                background-color: {style['bg']};
+                color: {style['text']};
+                border: 1px solid {style['border']};
+                border-radius: 4px;
+                padding: 0 10px;
+                font-size: 10px;
+                font-weight: 700;
+                letter-spacing: 0.5px;
+            """
+            )
 
     def _setup_ui(self):
         layout = QHBoxLayout(self)
@@ -133,9 +191,9 @@ class StatusBadge(QWidget):
                 "text": COLORS["info"],
             },
             ProfileStatus.STOPPED: {
-                "bg": "rgba(156, 163, 175, 0.12)",
-                "border": "#9ca3af",  # text_secondary - better contrast
-                "text": "#9ca3af",
+                "bg": "rgba(209, 213, 219, 0.12)",  # Improved contrast
+                "border": COLORS["text_secondary"],  # Using improved #d1d5db
+                "text": COLORS["text_secondary"],    # WCAG AA compliant
             },
             ProfileStatus.ERROR: {
                 "bg": "rgba(239, 68, 68, 0.15)",
@@ -168,6 +226,7 @@ class StatusBadge(QWidget):
             letter-spacing: 0.5px;
         """
         )
+        self._label = label  # Store reference
         layout.addWidget(label)
 
 
@@ -512,12 +571,16 @@ class FolderItem(QFrame):
         self.setCursor(Qt.CursorShape.PointingHandCursor)
 
     def _setup_ui(self):
-        bg = "rgba(128, 128, 128, 0.15)" if self.selected else "transparent"
+        # Use theme colors consistently for selected state
+        bg = COLORS["bg_selected"] if self.selected else "transparent"
         border = (
-            f"1px solid {self.folder.color}"
-            if not self.selected
-            else f"1px solid {COLORS['accent']}"
+            f"1px solid {COLORS['accent']}"
+            if self.selected
+            else f"1px solid {self.folder.color}"
         )
+        hover_bg = COLORS["bg_hover"]
+        hover_border = COLORS["accent"] if self.selected else self.folder.color
+
         self.setStyleSheet(
             f"""
             QFrame {{
@@ -527,8 +590,8 @@ class FolderItem(QFrame):
                 margin: 1px 8px;
             }}
             QFrame:hover {{
-                background-color: {COLORS['bg_hover'] if not self.selected else 'rgba(128, 128, 128, 0.15)'};
-                border: 1px solid {self.folder.color};
+                background-color: {hover_bg};
+                border: 1px solid {hover_border};
             }}
         """
         )

@@ -20,11 +20,14 @@ wheels/
 *.egg-info/
 .installed.cfg
 *.egg
+MANIFEST
 
 # Virtual environments
 .venv/
 venv/
 ENV/
+env/
+.virtualenv/
 
 # IDE
 .idea/
@@ -32,24 +35,37 @@ ENV/
 *.swp
 *.swo
 *~
+.project
+.pydevproject
+.settings/
+*.sublime-project
+*.sublime-workspace
+
+# Claude Code
+.claude/
+.docs/
 
 # Git account switcher (contains tokens)
 git-switch-account.sh
 
-# Internal documentation and configs
-.docs/
-.github/
-
 # Testing
 .pytest_cache/
 .coverage
+.coverage.*
 htmlcov/
 .tox/
 .nox/
+coverage.xml
+*.cover
+.hypothesis/
+pytest_debug.log
 
 # Type checking
 .mypy_cache/
 .dmypy.json
+dmypy.json
+.pyre/
+.pytype/
 
 # Logs
 *.log
@@ -75,6 +91,8 @@ data/proxy_pool.json
 data/folders.json
 data/profiles.json
 data/settings.json
+data/labels_pool.json
+data/trash.json
 
 # Environment
 .env
@@ -84,7 +102,13 @@ data/settings.json
 
 # OS
 .DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
 Thumbs.db
+Desktop.ini
 
 # Temporary files
 *.tmp
@@ -92,11 +116,16 @@ Thumbs.db
 tmp/
 temp/
 .cache/
+*.bak
+*.swp
+*~.nib
 
 # Secrets
 *.pem
 *.key
+*.p12
 secrets/
+credentials/
 
 # Browser data
 *.har
@@ -118,14 +147,99 @@ browser_state.json
 # Lock files
 **/lock
 *.lock
+.lock-wscript
 
-# Build artifacts (keep source files)
+# Build artifacts
 build/output/
+build/debian/
+build/*.exe
+build/*.deb
+build/*.dmg
+build/*.app
+build/*.AppImage
 *.spec.bak
+*.pyc
+
+# PyInstaller
+*.manifest
+*.spec
+
+# Installer logs
+pip-log.txt
+pip-delete-this-directory.txt
+
+# Distribution / packaging
+.Python
+*.so
+*.egg
+*.egg-info/
+dist/
+build/output/
+build/debian/
+build/*.exe
+build/*.deb
+build/*.dmg
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+var/
+wheels/
+share/python-wheels/
+*.dist-info/
 
 # Camoufox browser directory
 vendor/
 sandbox/
-scripts/
-docs/
-build/
+
+# Compiled translations
+*.mo
+*.pot
+
+# Jupyter Notebook
+.ipynb_checkpoints
+
+# IPython
+profile_default/
+ipython_config.py
+
+# Documentation builds
+docs/_build/
+docs/_static/
+docs/_templates/
+
+# Profiling data
+*.prof
+
+# Packer
+.packer/
+
+# Generated icons (keep SVG sources)
+assets/icons/*.png
+assets/icons/*.ico
+assets/icons/*.icns
+
+# macOS specific
+.app/
+*.dmg
+
+# Windows specific
+*.exe
+*.msi
+
+# Linux packages
+*.deb
+*.rpm
+*.tar.gz
+*.AppImage
+
+# Node modules (if any)
+node_modules/
+
+# Backup files
+*.backup
+*~
+tests
+assets/icons/README.md
+migrate_data.py

@@ -60,11 +60,10 @@ class TagsPage(QWidget):
         self._selected_tags: list[int] = []
         self._selected_statuses: list[int] = []
         self._selected_templates: list[int] = []
-        self._compact_mode = False
+        # Removed _compact_mode - no longer hiding columns on resize
 
         self._setup_ui()
         self._refresh_statuses_table()
-        self._apply_responsive_columns(self.width())
 
     def _setup_ui(self):
         """Setup page UI."""
@@ -105,89 +104,9 @@ class TagsPage(QWidget):
 
         layout.addWidget(self.tabs, 1)
 
-    def resizeEvent(self, event):
-        """Handle resize for responsive columns."""
-        super().resizeEvent(event)
-        self._apply_responsive_columns(event.size().width())
-
-    def _apply_responsive_columns(self, width: int) -> None:
-        """Show/hide columns based on available width."""
-        compact = width < 1000
-        if compact == self._compact_mode:
-            return
-
-        self._compact_mode = compact
-
-        self.tags_table.setColumnHidden(2, compact)
-        self.statuses_table.setColumnHidden(2, compact)
-        self.templates_table.setColumnHidden(2, compact)
-
-        from PyQt6.QtWidgets import QHeaderView
-
-        if compact:
-            self.tags_table.horizontalHeader().setSectionResizeMode(
-                0, QHeaderView.ResizeMode.Fixed
-            )
-            self.tags_table.setColumnWidth(0, Theme.COL_CHECKBOX)
-            self.tags_table.horizontalHeader().setSectionResizeMode(
-                1, QHeaderView.ResizeMode.Stretch
-            )
-            self.tags_table.horizontalHeader().setSectionResizeMode(
-                3, QHeaderView.ResizeMode.Fixed
-            )
-            self.tags_table.setColumnWidth(3, Theme.COL_ACTIONS_SM)
-
-            self.statuses_table.horizontalHeader().setSectionResizeMode(
-                0, QHeaderView.ResizeMode.Fixed
-            )
-            self.statuses_table.setColumnWidth(0, Theme.COL_CHECKBOX)
-            self.statuses_table.horizontalHeader().setSectionResizeMode(
-                1, QHeaderView.ResizeMode.Stretch
-            )
-            self.statuses_table.horizontalHeader().setSectionResizeMode(
-                3, QHeaderView.ResizeMode.Fixed
-            )
-            self.statuses_table.setColumnWidth(3, Theme.COL_ACTIONS_SM)
-
-            self.templates_table.horizontalHeader().setSectionResizeMode(
-                0, QHeaderView.ResizeMode.Fixed
-            )
-            self.templates_table.setColumnWidth(0, Theme.COL_CHECKBOX)
-            self.templates_table.horizontalHeader().setSectionResizeMode(
-                1, QHeaderView.ResizeMode.Stretch
-            )
-            self.templates_table.horizontalHeader().setSectionResizeMode(
-                3, QHeaderView.ResizeMode.Fixed
-            )
-            self.templates_table.setColumnWidth(3, Theme.COL_ACTIONS_SM)
-        else:
-            Theme.setup_table_columns(
-                self.tags_table,
-                [
-                    (0, "fixed", Theme.COL_CHECKBOX),
-                    (1, "stretch", None),
-                    (2, "fixed", 80),
-                    (3, "fixed", Theme.COL_ACTIONS_SM),
-                ],
-            )
-            Theme.setup_table_columns(
-                self.statuses_table,
-                [
-                    (0, "fixed", Theme.COL_CHECKBOX),
-                    (1, "stretch", None),
-                    (2, "fixed", Theme.COL_STATUS),
-                    (3, "fixed", Theme.COL_ACTIONS_SM),
-                ],
-            )
-            Theme.setup_table_columns(
-                self.templates_table,
-                [
-                    (0, "fixed", Theme.COL_CHECKBOX),
-                    (1, "stretch", None),
-                    (2, "stretch", None),
-                    (3, "fixed", Theme.COL_ACTIONS_SM),
-                ],
-            )
+    # Removed resizeEvent and _apply_responsive_columns
+    # Table columns are now configured once with proper sizing modes
+    # The Stretch mode ensures tables scale correctly without hiding columns
 
     def _create_tags_tab(self) -> QWidget:
         """Create tags management tab."""

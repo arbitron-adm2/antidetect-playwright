@@ -100,12 +100,39 @@ antidetect-browser
 
 ## ⚙️ Configuration
 
-All settings are managed through the GUI and stored in `data/` folder:
+### Data Storage Locations
 
-- **Browser profiles** - `data/profiles.json`
-- **Proxy settings** - `data/proxies.json`
-- **Tags & labels** - `data/tags_pool.json`, `data/labels_pool.json`
-- **GUI preferences** - `data/settings.json` (window size, theme, etc.)
+The application uses **platform-specific directories** following OS conventions:
+
+**Development Mode (from source):**
+- `./data/` (relative to project root)
+
+**Installed Package:**
+- **Linux:** `~/.local/share/antidetect-browser/`
+- **Windows:** `%APPDATA%\AntidetectBrowser\`
+- **macOS:** `~/Library/Application Support/AntidetectBrowser/`
+
+### Configuration Files
+
+All settings are managed through the GUI:
+
+- **Browser profiles** - `profiles.json`
+- **Proxy settings** - `proxy_pool.json` (encrypted passwords)
+- **Tags & labels** - `labels_pool.json`
+- **GUI preferences** - `settings.json` (window size, theme, etc.)
+- **Browser data** - `browser_data/{profile-id}/` (cookies, history, etc.)
+
+See [CONFIGURATION_STORAGE.md](docs/CONFIGURATION_STORAGE.md) for detailed documentation.
+
+### Migrating Existing Data
+
+If upgrading from a previous version with data in `./data/`:
+
+```bash
+python migrate_data.py
+```
+
+This will automatically move your data to the platform-specific location.
 
 ---
 

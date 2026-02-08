@@ -39,9 +39,8 @@ class TrashPage(QWidget):
         self._deleted_profiles: list[dict] = []  # List of {id, name, deleted_at}
         self._selected_rows: list[int] = []
         self._header_checked = False
-        self._compact_mode = False
+        # Removed _compact_mode - no longer hiding columns on resize
         self._setup_ui()
-        self._apply_responsive_columns(self.width())
 
     def _setup_ui(self):
         """Setup page UI."""
@@ -194,39 +193,9 @@ class TrashPage(QWidget):
 
         return table
 
-    def resizeEvent(self, event):
-        """Handle resize for responsive columns."""
-        super().resizeEvent(event)
-        self._apply_responsive_columns(event.size().width())
-
-    def _apply_responsive_columns(self, width: int) -> None:
-        """Show/hide columns based on available width."""
-        compact = width < 900
-        if compact == self._compact_mode:
-            return
-
-        self._compact_mode = compact
-        self.table.setColumnHidden(2, compact)
-
-        from PyQt6.QtWidgets import QHeaderView
-
-        header = self.table.horizontalHeader()
-        if compact:
-            header.setSectionResizeMode(0, QHeaderView.ResizeMode.Fixed)
-            self.table.setColumnWidth(0, Theme.COL_CHECKBOX)
-            header.setSectionResizeMode(1, QHeaderView.ResizeMode.Stretch)
-            header.setSectionResizeMode(3, QHeaderView.ResizeMode.Fixed)
-            self.table.setColumnWidth(3, Theme.COL_ACTIONS_SM)
-        else:
-            Theme.setup_table_columns(
-                self.table,
-                [
-                    (0, "fixed", Theme.COL_CHECKBOX),
-                    (1, "stretch", None),
-                    (2, "fixed", Theme.COL_DATE),
-                    (3, "fixed", Theme.COL_ACTIONS_SM),
-                ],
-            )
+    # Removed resizeEvent and _apply_responsive_columns
+    # Table columns are now configured once with proper sizing modes
+    # The Stretch mode ensures table scales correctly without hiding columns
 
     def _on_context_menu(self, pos):
         index = self.table.indexAt(pos)

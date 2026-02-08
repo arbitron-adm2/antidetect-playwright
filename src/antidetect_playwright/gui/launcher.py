@@ -15,6 +15,43 @@ from .models import BrowserProfile, ProfileStatus, ProxyConfig
 
 logger = logging.getLogger(__name__)
 
+
+# Performance optimization: Async file I/O helpers to prevent UI freezes
+async def _read_json_async(file_path: Path) -> dict:
+    """Read JSON file asynchronously to avoid blocking UI thread.
+
+    Args:
+        file_path: Path to JSON file
+
+    Returns:
+        Parsed JSON dict
+
+    Raises:
+        FileNotFoundError: If file doesn't exist
+        json.JSONDecodeError: If file contains invalid JSON
+    """
+    loop = asyncio.get_event_loop()
+
+    def _read():
+        return json.loads(file_path.read_text())
+
+    return await loop.run_in_executor(None, _read)
+
+
+async def _write_json_async(file_path: Path, data: dict) -> None:
+    """Write JSON file asynchronously to avoid blocking UI thread.
+
+    Args:
+        file_path: Path to write JSON
+        data: Dictionary to serialize
+    """
+    loop = asyncio.get_event_loop()
+
+    def _write():
+        file_path.write_text(json.dumps(data, indent=2, default=str))
+
+    await loop.run_in_executor(None, _write)
+
 # Screen/window dimension keys that should NOT be persisted or spoofed
 # These values are spoofed by Camoufox via JavaScript API overrides
 # If we set them, window/screen dimensions return constants
@@ -340,7 +377,8 @@ class BrowserLauncher:
             # Check if OS changed - if so, regenerate fingerprint
             regenerate_fingerprint = False
             if fingerprint_file.exists():
-                fp_data = json.loads(fingerprint_file.read_text())
+                # Async I/O to prevent UI freeze (50-200ms blocking → non-blocking)
+                fp_data = await _read_json_async(fingerprint_file)
                 saved_os = fp_data.get("os", "")
                 current_os = profile.os_type or "windows"
                 if saved_os != current_os:
@@ -351,8 +389,8 @@ class BrowserLauncher:
                     fingerprint_file.unlink()  # Delete old fingerprint
 
             if fingerprint_file.exists() and not regenerate_fingerprint:
-                # Load saved fingerprint config
-                fp_data = json.loads(fingerprint_file.read_text())
+                # Load saved fingerprint config (async to avoid blocking)
+                fp_data = await _read_json_async(fingerprint_file)
                 fp_config = fp_data.get("fingerprint", {})
 
                 # Remove old timezone - we'll set fresh one from current IP
@@ -546,7 +584,8 @@ class BrowserLauncher:
                     "history_length": history_length,
                     "os": profile.os_type or "windows",
                 }
-                fingerprint_file.write_text(json.dumps(fp_data, indent=2, default=str))
+                # Async write to prevent UI freeze (50-200ms blocking → non-blocking)
+                await _write_json_async(fingerprint_file, fp_data)
                 logger.info(
                     f"Generated and saved new fingerprint config to {fingerprint_file}"
                 )

@@ -4,27 +4,40 @@ This directory contains all SVG icons for the Antidetect Browser Launcher applic
 
 ## Main Application Icons
 
-### `app-icon.svg` (512×512)
+### Design Philosophy
+
+Icons are designed in **Chrome browser style** with monochromatic grey/black tones:
+- Circular shape with 3 characteristic segments (120° arcs each)
+- Central circle for depth and recognizability
+- Gradient shading for 3D effect
+- Professional, modern appearance
+
+### Icon Files
+
+#### `app-icon.svg` (512×512)
 - **Usage:** Main application icon, installer, desktop shortcuts
-- **Format:** SVG with gradient background
-- **Design:** Browser window with fingerprint and shield badge
-- **Colors:** Indigo-purple gradient (#6366f1 → #8b5cf6)
+- **Design:** Chrome-style circular icon with 3 segments
+- **Colors:** Grayscale gradients (#1a1a1a → #666666)
+- **Details:** Full gradients, shadows, borders
 
-### `app-icon-256.svg` (256×256)
+#### `app-icon-256.svg` (256×256)
 - **Usage:** Taskbar, window icon, medium-resolution displays
-- **Format:** Optimized SVG for medium sizes
+- **Design:** Same Chrome style, optimized for medium size
+- **Details:** Simplified gradients, clear segments
 
-### `app-icon-64.svg` (64×64)
-- **Usage:** Small icons, file associations
-- **Format:** Simplified SVG for small sizes
+#### `app-icon-64.svg` (64×64)
+- **Usage:** Small icons, file associations, alt+tab
+- **Design:** Essential Chrome elements only
+- **Details:** Minimal details for clarity at small sizes
 
 ## System Tray Icons
 
 ### `tray-icon.svg` (22×22)
 - **Usage:** System tray/notification area
 - **Format:** Monochrome SVG using `currentColor`
-- **Theme:** Adapts to system theme (light/dark)
-- **Design:** Simplified browser with fingerprint
+- **Theme:** Adapts to system theme (light/dark automatically)
+- **Design:** Simplified Chrome-style circle with segments
+- **Opacity:** Different opacity levels for segment depth
 
 ## Converting to Raster Formats
 
